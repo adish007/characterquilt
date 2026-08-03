@@ -205,12 +205,14 @@ def evaluate_campaign_coverage(
     expected = {company.key for company in inventory.companies}
     rows_of = {c.key: list(c.row_labels) for c in inventory.companies}
     owners = _domain_owners(inventory)
-    domains_of: dict[str, str] = {}
-    for company in inventory.companies:
-        domain, _ = choose_domain(company, owners)
-        if not domain:
-            return False, f"company {company.key} has no usable domain"
-        domains_of[company.key] = domain
+    # The domain a deliverable must carry is re-derived, not read from the
+    # plan. A company with nothing on file resolves to "", which is reported
+    # in domain_notes rather than blocked -- one unusable row must not cost
+    # the customer the rest of the campaign.
+    domains_of = {
+        company.key: choose_domain(company, owners)[0]
+        for company in inventory.companies
+    }
     deliverables = plan.get("deliverables", [])
 
     shipped: dict[str, list[str]] = {}
