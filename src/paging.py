@@ -2,13 +2,28 @@
 
 `AccountPageLoader` is the only supported way to read an upload. The service
 has produced several broken paging shapes (see `sources.py`), so collection
-here is defensive: it keeps paging while pages yield rows it has not already
-seen, and stops with a stated reason when they stop.
+here is defensive: it keeps paging until the service ends the list, stalls, or
+runs out of rope, and it always states why it stopped.
 
-One shape is deliberately *not* detectable at this layer. A read that stops
-early and reports `truncated=False` is indistinguishable from a genuine end
-without an independent expected row count. `ReadResult.complete` records only
-what the service claimed; verifying that claim is the caller's job.
+Two signals that look alike are kept apart on purpose, because conflating them
+loses rows:
+
+* *Stalling* is about the cursor. Consecutive pages that carry nothing new mean
+  the service is no longer advancing, so the read must end. That says nothing
+  about whether the rows already collected were real.
+* *Replaying* is about a page. A page whose content we have seen before is only
+  a **suspected** replay. The protocol cannot decide it: an upload may
+  legitimately contain two identical pages, and dropping the second one silently
+  deletes real rows.
+
+So no row is ever discarded during the read. Both readings are kept — every row
+served, and the rows left after removing repeated pages — and the declared row
+count of the upload (`expected_row_count`) picks between them. Without one, the
+result reports `verified_complete="unknown"` rather than guessing.
+
+Whether a read that stops early while reporting `truncated=False` is a genuine
+end is likewise undecidable at this layer; that claim is recorded separately in
+`service_claimed_complete`.
 """
 from __future__ import annotations
 
@@ -33,14 +48,43 @@ class ReadResult:
     """Rows collected from one upload, and how much of it we can vouch for."""
 
     rows: list[dict[str, Any]]
-    complete: bool
+    """The working answer: the reading of the upload we would act on."""
+
+    service_claimed_complete: bool
+    """Whether the read ended because the service reported `truncated=False`."""
+
+    verified_complete: str
+    """`"true"` / `"false"` / `"unknown"` — checked against a declared size."""
+
     reason: str
     pages_requested: int
-    pages_with_new_rows: int
+
+    rows_served: int
+    """Every row the service handed over, duplicates included."""
+
+    rows_deduped: int
+    """Rows left after removing pages whose content had already been served."""
+
+    # Compatibility only: `aj_work/audit.py` and `aj_work/discrepancies.py`
+    # read `read.complete`, which predates the claimed/verified split.
+    pages_with_new_rows: int = 0
+
+    @property
+    def complete(self) -> bool:
+        """Alias of `service_claimed_complete`, kept for existing callers.
+
+        `aj_work/audit.py` and `aj_work/discrepancies.py` read `read.complete`.
+        It is the service's *claim*, never a verified fact — use
+        `verified_complete` for that.
+        """
+        return self.service_claimed_complete
 
     @property
     def barren_pages(self) -> int:
-        """Pages the service served that carried nothing we had not seen."""
+        """Pages the service served that carried nothing we had not seen.
+
+        Compatibility only, for `aj_work/audit.py`.
+        """
         return self.pages_requested - self.pages_with_new_rows
 
 
@@ -53,67 +97,109 @@ def _fingerprint(rows: list[dict[str, Any]]) -> str:
     return json.dumps(rows, sort_keys=True, default=str)
 
 
+def _resolve(
+    served: list[dict[str, Any]],
+    fresh: list[dict[str, Any]],
+    expected_row_count: int | None,
+) -> tuple[list[dict[str, Any]], str, str]:
+    """Choose between the two readings of the upload, and say how sure we are.
+
+    Returns `(rows, verified_complete, note)` where `note` is appended to the
+    reason. Repeated pages are only a *suspected* replay, so this is the one
+    place allowed to prefer one reading over the other — and only ever because
+    a declared size says so.
+    """
+    if expected_row_count is None:
+        note = ""
+        if len(served) != len(fresh):
+            note = (
+                f"; {len(served)} rows served, {len(fresh)} after removing "
+                "repeated pages — cannot tell which is right without a "
+                "declared size"
+            )
+        return served, "unknown", note
+
+    expected = expected_row_count
+    if len(fresh) == expected:
+        return fresh, "true", f"; matches declared size {expected}"
+    if len(served) == expected:
+        return (
+            served,
+            "true",
+            f"; repeated pages were legitimate, matches declared size {expected}",
+        )
+    return (
+        fresh,
+        "false",
+        f"; expected {expected} rows, collected {len(fresh)}",
+    )
+
+
 def collect_rows(
     loader: AccountPageLoader,
     *,
     page_size: int = 25,
+    expected_row_count: int | None = None,
 ) -> ReadResult:
-    """Page through `loader` until it ends, stalls, or runs out of rope."""
-    rows: list[dict[str, Any]] = []
+    """Page through `loader` until it ends, stalls, or runs out of rope.
+
+    Pass `expected_row_count` (the upload's declared size) to get a verified
+    answer; without it the read still returns every row it was served.
+    """
+    served: list[dict[str, Any]] = []
+    fresh: list[dict[str, Any]] = []
     seen_pages: set[str] = set()
     cursor: str | None = None
     requested = 0
-    no_progress = 0
+    barren = 0
+    claimed = False
 
     while True:
         page = loader.load_page(cursor=cursor, page_size=page_size)
         requested += 1
 
+        # Never discard rows here: a repeated page may be a real part of the
+        # upload, and only the declared size can tell.
+        served.extend(page.rows)
+
         fingerprint = _fingerprint(page.rows)
         if fingerprint in seen_pages:
-            no_progress += 1
+            barren += 1
         else:
             seen_pages.add(fingerprint)
-            rows.extend(page.rows)
-            no_progress = 0
+            fresh.extend(page.rows)
+            barren = 0
 
         if not page.truncated:
-            return ReadResult(
-                rows=rows,
-                complete=True,
-                reason="service reported the end of the list",
-                pages_requested=requested,
-                pages_with_new_rows=len(seen_pages),
-            )
+            claimed = True
+            reason = "service reported the end of the list"
+            break
 
         if page.next_cursor is None:
-            return ReadResult(
-                rows=rows,
-                complete=False,
-                reason="service reported more rows but supplied no cursor",
-                pages_requested=requested,
-                pages_with_new_rows=len(seen_pages),
-            )
+            reason = "service reported more rows but supplied no cursor"
+            break
 
-        if no_progress >= NO_PROGRESS_LIMIT:
-            return ReadResult(
-                rows=rows,
-                complete=False,
-                reason=(
-                    f"cursor stopped advancing at {page.next_cursor!r} "
-                    f"after {no_progress} pages with no new rows"
-                ),
-                pages_requested=requested,
-                pages_with_new_rows=len(seen_pages),
+        if barren >= NO_PROGRESS_LIMIT:
+            reason = (
+                f"cursor stopped advancing at {page.next_cursor!r} "
+                f"after {barren} pages with no new rows"
             )
+            break
 
         if requested >= PAGE_REQUEST_LIMIT:
-            return ReadResult(
-                rows=rows,
-                complete=False,
-                reason=f"gave up after {PAGE_REQUEST_LIMIT} page requests",
-                pages_requested=requested,
-                pages_with_new_rows=len(seen_pages),
-            )
+            reason = f"gave up after {PAGE_REQUEST_LIMIT} page requests"
+            break
 
         cursor = page.next_cursor
+
+    rows, verified, note = _resolve(served, fresh, expected_row_count)
+    return ReadResult(
+        rows=rows,
+        service_claimed_complete=claimed,
+        verified_complete=verified,
+        reason=reason + note,
+        pages_requested=requested,
+        rows_served=len(served),
+        rows_deduped=len(fresh),
+        pages_with_new_rows=len(seen_pages),
+    )
