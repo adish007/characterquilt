@@ -41,14 +41,31 @@ Inside block 1, the trouble is not scattered:
 
 | id range | rows | what they are |
 |---|---|---|
-| `1001-1200` | 200 | clean |
+| `1001-1200` | 200 | internally unique company IDs and domains; 8 request overrides |
 | `1201-1212` | 12 | duplicate re-imports (`Inc` / ALL-CAPS name variants) |
 | `1213-1215` | 3 | `-emea` subsidiaries carrying the parent's domain |
 | `1216-1217` | 2 | duplicates carrying a *different* domain |
 | `2401-2406` | 6 | unresolved identity |
 
-200 + 12 + 3 + 2 + 6 = 223. Every row that makes the count arguable lives above
-`row-1200`. The base upload is clean.
+200 + 12 + 3 + 2 + 6 = 223. Every row that makes **the count** arguable lives
+above `row-1200`.
+
+That is a claim about the count only. The `1001-1200` block is **internally**
+unique — 200 rows, 200 distinct company IDs, 200 distinct domains, no blanks —
+but "internally" is doing real work in that sentence, and two things qualify it:
+
+- **Later rows introduce duplicates and conflicts that reach back into this
+  range.** 14 of the 200 share a domain with a row above `row-1200`, including
+  `row-1020`, `row-1047`, `row-1076` and `row-1093`, which become one side of the
+  four contested identity relationships. The block is clean read alone, not clean
+  read against the rest of the file.
+- **It contains 8 of the 9 request overrides** (`row-1014`, `row-1082`,
+  `row-1084`, `row-1123`, `row-1140`, `row-1163`, `row-1176`, `row-1195`); only
+  `row-1213` sits above the boundary. These do not change how many companies
+  there are, which is why they leave the block story intact — but they are the
+  direct cause of the customer's "creative is not in the brand we picked."
+
+So the base upload is internally consistent on identity, not defect-free.
 
 ### 3. The starter is wrong in *both* directions, not just "duplicates survive". *(not automated)*
 
@@ -124,7 +141,26 @@ adjacent-pair check reports 17.
 List 1's mess is **appended** — a re-import batch plus an unresolved batch,
 carrying genuine identity conflicts and 9 rows that override the request. Its
 answer cannot be a bare integer: it is *209, of which 6 unidentified and 5
-ambiguous*.
+contested*.
+
+Stated precisely: **four contested identity relationships, involving eight
+company IDs, drive the 209-versus-205 decision.** Each relationship is one domain
+carrying two company IDs, and both IDs in a pair are contested — the upload does
+not establish either as canonical, so the count falls by 4 whichever side a merge
+absorbs. Four records would be absorbed under the most likely reading: the three
+`-emea` records added at `row-1213`–`row-1215`, plus `company-copperline-energy`.
+`company-kestrel-robotics` additionally needs domain resolution without affecting
+the count.
+
+Note the fourth relationship works differently from the other three. The `-emea`
+records are later-added companies. `company-copperline-energy` is not: it is a
+base-block company at `row-1100`, pulled onto another company's domain by the
+later `row-1217`. A later row, not a later company.
+
+That is why 4, 8 and 5 all appear, and they are not in conflict — 4
+relationships, 8 IDs involved, 5 companies needing a human. Definitions and the
+full table are in `step1_discrepancies.md`, "Canonical wording for the contested
+records."
 
 List 2's mess is **inline** — no separate batches, no domain conflicts, no
 overrides. Its only exotic case is three byte-identical rows. Its answer is a

@@ -21,6 +21,64 @@ Under that rule, list 1 has 209 logical company records and list 2 has 99.
 Those counts are policy-dependent conclusions, not facts contained explicitly
 in the JSON.
 
+### Canonical wording for the contested records
+
+Two different numbers describe the contested rows in list 1, and they answer
+different questions. These are the agreed terms; use them verbatim in
+`new_discrepancies.md`, `context.md` and `DECISIONS.md` so 4 and 5 never read as
+a contradiction.
+
+**4 contested identity relationships, involving 8 company IDs** — these drive the
+209-versus-205 decision. Each is one domain carrying two nonblank company IDs.
+Both IDs in a pair are contested; neither is established as the canonical one by
+anything in the upload:
+
+| Domain | Company ID A | Company ID B |
+|---|---|---|
+| `northwind-energy.example` | `company-northwind-energy` (`row-1020`) | `company-northwind-energy-emea` (`row-1213`) |
+| `sable-fitness.example` | `company-sable-fitness` (`row-1047`) | `company-sable-fitness-emea` (`row-1214`) |
+| `tessellate-capital.example` | `company-tessellate-capital` (`row-1076`) | `company-tessellate-capital-emea` (`row-1215`) |
+| `copperline-group.example` | `company-copperline-group` (`row-1093`, `row-1206`) | `company-copperline-energy` (`row-1100`, `row-1217`) |
+
+Merging all four relationships gives 205. Not merging gives 209. **The count
+drops by 4 regardless of which side of each pair survives** — which side is
+absorbed is a policy choice, not a fact in the data. Earlier drafts of this note
+listed only the `-emea`/Energy side as "at risk," which silently assumed the
+other side was canonical. That assumption is not supported by the upload.
+
+Row order is the only asymmetry available, and it does not point the same way in
+all four cases:
+
+- Three of the four contested relationships were created by a **later-added
+  record**: `company-northwind-energy-emea`, `company-sable-fitness-emea` and
+  `company-tessellate-capital-emea` exist only at `row-1213`–`row-1215`.
+- The fourth is different. `company-copperline-energy` is a **base-block
+  company** at `row-1100` with its own domain. A later row, `row-1217`, places
+  that same company ID on `copperline-group.example`. Here a later *row* pulls a
+  pre-existing *company* into the conflict — not a later company appearing.
+
+**5 contested companies** — the records a human must review before the campaign
+is trusted. Four of the eight IDs above are the ones a merge would absorb under
+the most likely reading (the three `-emea` records plus `company-copperline-energy`),
+and in addition:
+
+| Company | Why contested | Changes the count? |
+|---|---|---|
+| `company-kestrel-robotics` | one ID, two domains (`kestrel-robotics.example`, `kestrel-group.example`) | **no** |
+
+`company-kestrel-robotics` stays one company under our rule, so it never moves
+the total — but which domain personalizes its creative is unresolved, and
+picking the first row encountered makes that an ordering accident. It is a
+correctness problem in the output, not a counting problem.
+
+`company-copperline-energy` appears in both classes: it carries two domains
+*and* one of those domains belongs to another company ID. It is counted once.
+
+So: **the count is 209, the merge alternative is 205, 4 relationships across 8
+company IDs drive that gap, and 5 companies need review.** When quoting a single
+figure, say which of the three you mean — relationships (4), IDs involved (8), or
+companies needing review (5).
+
 ## List 1: `target_accounts.json`
 
 ### Summary
@@ -28,7 +86,7 @@ in the JSON.
 | Discrepancy type | Groups/rows | Effect or risk |
 |---|---:|---|
 | Missing company ID (`null`) | 6 rows | A string conversion makes all six look like the same ID, even though names and domains differ. |
-| Repeated nonblank company ID | 13 groups, 28 rows | There are 14 extra source rows after grouping; `company-sable-works` occurs three times. |
+| Repeated nonblank company ID | 13 groups, 27 rows | There are 14 extra source rows after grouping; `company-sable-works` occurs three times. |
 | Same company ID, conflicting domain | 2 groups | Identity count may remain one per ID, but the correct domain is unresolved. |
 | Same domain, different company IDs | 4 domains | Domain cannot safely be used as a global identity key. |
 | Saved settings conflict with request | 9 rows | These rows select the legacy Brand Kit and template instead of the request settings. |

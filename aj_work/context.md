@@ -24,7 +24,18 @@ are not alternatives to each other.
 | 223 | rows | rows actually present in `fixtures/target_accounts.json` |
 | 217 | rows | what the README claims, and what the service actually served |
 | 209 | companies | logical companies under our identity rule |
-| 205 | companies | the alternative if same-domain groups were merged |
+| 205 | companies | the alternative if the 4 contested identity relationships were merged |
+
+Terminology note: **4 contested identity relationships, involving 8 company IDs**,
+drive the 209-versus-205 decision. Both IDs in each pair are contested — the
+upload establishes neither as canonical — so the count falls by 4 whichever side
+a merge absorbs. Separately, **5 contested companies** need human review: the four
+a merge would most likely absorb, plus `company-kestrel-robotics`, whose two
+domains are unresolved but whose count is not in doubt. 4, 8 and 5 answer
+different questions and are not in conflict; say which you mean when quoting one.
+Canonical definitions and the full table live in
+`discrepencies/step1_discrepancies.md`, "Canonical wording for the contested
+records."
 
 The `223 → 217` gap is explained exactly by the row-id blocks:
 
@@ -49,7 +60,7 @@ The ladder from rows to companies:
                                                 (unique domains, zero collisions)
 
      203 + 6 = 209 logical companies
-     209 − 4 = 205 if the same-domain groups were merged
+     209 − 4 = 205 if the 4 contested identity relationships were merged
 ```
 
 **Takeaway: no number quoted anywhere in the starter is trustworthy without
@@ -242,7 +253,7 @@ Specific traps:
   re-collapses list 2's two `Unresolved Import` rows.
 - **List 2 has no brand-kit overrides**, so the exception report must be correct
   when empty.
-- **List 2 has no ambiguous domains**, so it returns 99 whether we report
+- **List 2 has no contested identity relationships**, so it returns 99 whether we report
   209-and-flag or merge-to-205. **List 2 cannot validate the identity choice** —
   it can only prove we did not hardcode it.
 - **The page-boundary distribution is inverted** (5-of-13 vs 1-of-15), so
@@ -251,7 +262,7 @@ Specific traps:
 - **Name normalization** built against list 2 alone never learns case folding.
 
 **Why the two lists do not produce the same shape of answer:** list 1 requires an
-"ambiguous — needs a human" section that list 2's report legitimately leaves
+"contested — needs a human" section that list 2's report legitimately leaves
 empty. A check that emits one clean number for both is hiding something.
 
 ---
@@ -264,7 +275,7 @@ Every line of `fixtures/customer_report.txt` is accounted for:
 |---|---|
 | "a couple of companies came back twice" | 6, page-size dependent |
 | "creative is not in the brand we picked" | 36 deliverables in `brand-kit-2019-legacy` |
-| "entries I cannot tell apart" | the 4 same-domain / different-id `-emea` groups |
+| "entries I cannot tell apart" | 4 contested identity relationships across 8 company IDs; 5 companies need review |
 | "a rerun that never came back" | t-77b3, stalled cursor, 90s timeout |
 | "I don't believe the number" | correct — 209 is right for the wrong reasons |
 
@@ -296,14 +307,20 @@ Four separable obligations: **coverage**, **traceability**, **determinism**,
   state of the upload, cannot be determined from what is here. It does not
   change the fix — a reader must reconcile against what it was asked to load —
   but it should be flagged as open, not asserted as a cause.
-- **The 4 same-domain groups (209 vs 205).** Current position: report 209 and
-  flag the 4 as ambiguous rather than deciding for the customer. Silently
+- **The 4 contested identity relationships (209 vs 205).** Current position:
+  report 209 and flag them rather than deciding for the customer. Silently
   merging a regional subsidiary is the same class of error as silently dropping
-  one. This is a policy choice, not a fact in the data.
+  one. This is a policy choice, not a fact in the data — and note that the
+  choice is doubly open: whether to merge at all, and if so which of the two
+  company IDs in each pair survives. The upload establishes neither as
+  canonical.
 - **The 2 same-ID / conflicting-domain groups** (`company-kestrel-robotics`,
   `company-copperline-energy`, per `step1_discrepancies.md`). The company count
   can stay at one per ID, but which domain is correct is unresolved, and picking
   the first row encountered makes personalization an ordering accident.
+  `company-copperline-energy` is already inside the group of 4;
+  `company-kestrel-robotics` is the 5th contested company and affects output
+  correctness without affecting the count.
 - **Whether `saved_brand_kit_id` is a bug or a feature.** The customer says the
   creative was not in the brand they picked. Leaning toward *surfacing as an
   exception rather than removing the mechanism* — but silent override is wrong
