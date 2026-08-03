@@ -8,9 +8,9 @@ runs out of rope, and it always states why it stopped.
 Two signals that look alike are kept apart on purpose, because conflating them
 loses rows:
 
-* *Stalling* is about the cursor. Consecutive pages that carry nothing new mean
-  the service is no longer advancing, so the read must end. That says nothing
-  about whether the rows already collected were real.
+* *Stalling* is about the response state. The same request cursor returning the
+  same content and next cursor again cannot make progress, so the read must end.
+  Repeated content under advancing cursors is allowed.
 * *Replaying* is about a page. A page whose content we have seen before is only
   a **suspected** replay. The protocol cannot decide it: an upload may
   legitimately contain two identical pages, and dropping the second one silently
@@ -34,14 +34,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # `repair_lab` imports this module, so only type-check it.
     from repair_lab import AccountPageLoader
 
-# Stop of last resort. A cursor that neither advances nor repeats a page we
-# have already ingested would otherwise page forever.
+# Stop of last resort for a service that keeps producing novel response states
+# forever without ever reporting the end of the list.
 PAGE_REQUEST_LIMIT = 10_000
-
-# How many consecutive pages may yield nothing new before we call it stalled.
-# Must be >= 2: a service that replays each page once (ReplayingLoader) is
-# recoverable and produces exactly one barren page between useful ones.
-NO_PROGRESS_LIMIT = 2
 
 
 @dataclass(frozen=True)
@@ -102,6 +97,8 @@ def _resolve(
     served: list[dict[str, Any]],
     fresh: list[dict[str, Any]],
     expected_row_count: int | None,
+    *,
+    service_claimed_complete: bool,
 ) -> tuple[list[dict[str, Any]], str, str]:
     """Choose between the two readings of the upload, and say how sure we are.
 
@@ -110,6 +107,22 @@ def _resolve(
     place allowed to prefer one reading over the other — and only ever because
     a declared size says so.
     """
+    if not service_claimed_complete:
+        if expected_row_count is None:
+            return (
+                served,
+                "false",
+                f"; collected {len(served)} rows, but the service never "
+                "reported the end of the list",
+            )
+        rows = fresh if len(fresh) <= len(served) else served
+        return (
+            rows,
+            "false",
+            f"; expected {expected_row_count} rows, collected {len(rows)}, "
+            "but the service never reported the end of the list",
+        )
+
     if expected_row_count is None:
         note = ""
         if len(served) != len(fresh):
@@ -152,8 +165,8 @@ def collect_rows(
     seen_pages: set[str] = set()
     cursor: str | None = None
     requested = 0
-    barren = 0
     claimed = False
+    seen_responses: set[tuple[str | None, str | None, str]] = set()
 
     while True:
         page = loader.load_page(cursor=cursor, page_size=page_size)
@@ -164,12 +177,9 @@ def collect_rows(
         served.extend(page.rows)
 
         fingerprint = _fingerprint(page.rows)
-        if fingerprint in seen_pages:
-            barren += 1
-        else:
+        if fingerprint not in seen_pages:
             seen_pages.add(fingerprint)
             fresh.extend(page.rows)
-            barren = 0
 
         if not page.truncated:
             claimed = True
@@ -180,12 +190,19 @@ def collect_rows(
             reason = "service reported more rows but supplied no cursor"
             break
 
-        if barren >= NO_PROGRESS_LIMIT:
+        # A repeated page body is ambiguous: several legitimate consecutive
+        # pages may contain identical rows. A repeated *response state* is not
+        # ambiguous -- the same request cursor produced the same rows and the
+        # same next cursor again, so following it cannot make progress. This
+        # also catches a cursor cycle once it revisits an earlier transition.
+        response_state = (cursor, page.next_cursor, fingerprint)
+        if response_state in seen_responses:
             reason = (
-                f"cursor stopped advancing at {page.next_cursor!r} "
-                f"after {barren} pages with no new rows"
+                f"paging repeated the response state at cursor {cursor!r} "
+                f"with next cursor {page.next_cursor!r}"
             )
             break
+        seen_responses.add(response_state)
 
         if requested >= PAGE_REQUEST_LIMIT:
             reason = f"gave up after {PAGE_REQUEST_LIMIT} page requests"
@@ -193,7 +210,12 @@ def collect_rows(
 
         cursor = page.next_cursor
 
-    rows, verified, note = _resolve(served, fresh, expected_row_count)
+    rows, verified, note = _resolve(
+        served,
+        fresh,
+        expected_row_count,
+        service_claimed_complete=claimed,
+    )
     return ReadResult(
         rows=rows,
         service_claimed_complete=claimed,

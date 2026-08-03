@@ -220,11 +220,14 @@ class PagingTests(unittest.TestCase):
                                 expected_row_count=len(accounts),
                             )
                         self.assertIn(read.verified_complete, ("true", "false"))
-                        # The verdict must track the rows, not the service's mood.
-                        self.assertEqual(
-                            read.verified_complete == "true",
-                            read.rows == accounts,
-                        )
+                        # A matching row count is necessary but not sufficient:
+                        # a cycling service can visit every row and still never
+                        # report that the upload ended.
+                        if read.verified_complete == "true":
+                            self.assertTrue(read.service_claimed_complete)
+                            self.assertEqual(read.rows, accounts)
+                        if not read.service_claimed_complete:
+                            self.assertEqual(read.verified_complete, "false")
                         self.assertTrue(read.reason.strip())
                         if read.verified_complete == "false":
                             self.assertIn(str(len(accounts)), read.reason)
@@ -270,6 +273,30 @@ class PagingTests(unittest.TestCase):
             len({label for c in inventory.companies for label in c.row_labels}),
             len(upload),
         )
+
+    def test_three_identical_pages_followed_by_more_data_lose_no_rows(self) -> None:
+        """Repeated content is not a stall while the cursor keeps advancing."""
+        same = {
+            "id": "same-id",
+            "company_id": "same-company",
+            "company_name": "Same Company",
+            "domain": "same.test",
+        }
+        last = {
+            "id": "last-id",
+            "company_id": "last-company",
+            "company_name": "Last Company",
+            "domain": "last.test",
+        }
+        upload = [copy.deepcopy(same) for _ in range(3)] + [last]
+        read = collect_rows(
+            TargetAccountTool(upload),
+            page_size=1,
+            expected_row_count=len(upload),
+        )
+        self.assertTrue(read.service_claimed_complete)
+        self.assertEqual(read.verified_complete, "true")
+        self.assertEqual(read.rows, upload)
 
     def test_a_short_read_reconciles_as_incomplete(self) -> None:
         """A service that stops early while claiming success must be caught.
@@ -400,6 +427,19 @@ class DomainSelectionTests(unittest.TestCase):
                 ]
                 self.assertEqual(blank, [])
 
+    def test_missing_domain_stops_campaign_construction(self) -> None:
+        """A landing page with no address must never be represented as shipped."""
+        upload = [
+            {
+                "id": "r1",
+                "company_id": "identity-a",
+                "company_name": "A",
+                "domain": "",
+            }
+        ]
+        with self.assertRaisesRegex(ValueError, "no domain on file"):
+            plan_for(upload)
+
 
 class CoverageEvaluatorTests(unittest.TestCase):
     """The evaluator must reject a plan for the reasons a customer would."""
@@ -464,6 +504,25 @@ class CoverageEvaluatorTests(unittest.TestCase):
                 plan["deliverables"][0]["source_row_ids"] = ["row-never-uploaded"]
                 self.assertRejected(plan, accounts)
 
+    def test_duplicate_provenance_is_rejected(self) -> None:
+        """A row citation must match exactly, including multiplicity."""
+        plan, accounts = self.good(LARGEST_UPLOAD)
+        item = next(
+            d for d in plan["deliverables"] if len(d["source_row_ids"]) > 1
+        )
+        item["source_row_ids"].append(item["source_row_ids"][0])
+        self.assertRejected(plan, accounts)
+
+    def test_wrong_or_empty_personalisation_domain_is_rejected(self) -> None:
+        """Correct rows cannot excuse a wrong or missing destination."""
+        for name in UPLOADS:
+            for invalid_domain in ("wrong.test", ""):
+                with self.subTest(upload=name, domain=invalid_domain):
+                    plan, accounts = self.good(name)
+                    for item in plan["deliverables"]:
+                        item["domain"] = invalid_domain
+                    self.assertRejected(plan, accounts)
+
     def test_an_unauthorised_brand_kit_is_rejected(self) -> None:
         """Creative in a brand the customer did not select is off-brand."""
         for name in UPLOADS:
@@ -497,6 +556,8 @@ class CoverageEvaluatorTests(unittest.TestCase):
              "domain": "a.test"},
             {"id": "same-id", "company_id": "", "company_name": "B",
              "domain": "b.test"},
+            {"id": "same-id#0", "company_id": " ", "company_name": "C",
+             "domain": "c.test"},
         ]
         companies = build_inventory(upload).companies
         self.assertEqual(len(companies), len(upload))

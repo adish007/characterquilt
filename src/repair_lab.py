@@ -70,7 +70,9 @@ def choose_domain(
 ) -> tuple[str, str]:
     """Pick the one domain that personalizes a company. Returns (domain, note).
 
-    A landing page needs exactly one address, so this cannot decline to choose.
+    A landing page needs exactly one address. If none exists, the caller must
+    stop campaign construction rather than represent an empty address as a
+    deliverable.
     A shared domain is *less preferred*, never disqualified: three EMEA
     subsidiaries and their parents hold nothing else, and refusing it would
     delete a company over a data-quality problem.
@@ -104,6 +106,11 @@ def _make_deliverables(
 
     for company in inventory.companies:
         domain, note = choose_domain(company, owners)
+        if not domain:
+            raise ValueError(
+                f"cannot build campaign for company {company.key}: "
+                "no domain on file"
+            )
         if note:
             notes.append(
                 {"company": company.key, "domain_used": domain, "note": note}
@@ -201,7 +208,14 @@ def evaluate_campaign_coverage(
     )
     inventory = build_inventory(read.rows)
     expected = {company.key for company in inventory.companies}
-    rows_of = {c.key: set(c.row_labels) for c in inventory.companies}
+    rows_of = {c.key: list(c.row_labels) for c in inventory.companies}
+    owners = _domain_owners(inventory)
+    domains_of: dict[str, str] = {}
+    for company in inventory.companies:
+        domain, _ = choose_domain(company, owners)
+        if not domain:
+            return False, f"company {company.key} has no usable domain"
+        domains_of[company.key] = domain
     deliverables = plan.get("deliverables", [])
 
     shipped: dict[str, list[str]] = {}
@@ -228,10 +242,13 @@ def evaluate_campaign_coverage(
     # 5 attribution, 6 traceability
     traced: set[str] = set()
     for item in deliverables:
-        cited = set(item.get("source_row_ids", []))
-        if cited != rows_of[str(item["company_key"])]:
+        key = str(item["company_key"])
+        cited = item.get("source_row_ids")
+        if not isinstance(cited, list) or cited != rows_of[key]:
             return False, f"deliverable for {item['company_key']} cites the wrong rows"
-        traced |= cited
+        if item.get("domain") != domains_of[key]:
+            return False, f"deliverable for {item['company_key']} uses the wrong domain"
+        traced.update(cited)
     untraced = {label for rows in rows_of.values() for label in rows} - traced
     if untraced:
         return False, f"{len(untraced)} uploaded rows reach no deliverable, e.g. {min(untraced)}"

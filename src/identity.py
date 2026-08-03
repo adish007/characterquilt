@@ -50,22 +50,34 @@ def unique_row_labels(rows: list[dict[str, Any]]) -> tuple[str, ...]:
     indistinguishable in a deliverable, and — for unidentified rows, whose key
     is built from the label — would merge into a single company in violation of
     rule 2. Labels seen exactly once are left alone so the common upload reads
-    naturally; a repeated label gets ``#0``, ``#1``, ... on every occurrence in
-    order, so no row silently borrows another's provenance.
+    naturally; a repeated label gets the next available ``#N`` suffix on every
+    occurrence, skipping suffixes that are literal uploaded ids, so no row
+    silently borrows another's provenance.
     """
     bases = [row_label(row, index) for index, row in enumerate(rows)]
     counts: dict[str, int] = {}
     for base in bases:
         counts[base] = counts.get(base, 0) + 1
-    seen: dict[str, int] = {}
+    # Generated suffixes must not collide with another row's literal uploaded
+    # id. For example, ``dup``, ``dup``, and ``dup#0`` are three rows, not two.
+    # Reserve every literal base before assigning any generated label.
+    reserved = set(bases)
+    next_suffix: dict[str, int] = {}
+    assigned: set[str] = set()
     labels: list[str] = []
     for base in bases:
         if counts[base] == 1:
             labels.append(base)
+            assigned.add(base)
             continue
-        occurrence = seen.get(base, 0)
-        seen[base] = occurrence + 1
-        labels.append(f"{base}#{occurrence}")
+        suffix = next_suffix.get(base, 0)
+        candidate = f"{base}#{suffix}"
+        while candidate in reserved or candidate in assigned:
+            suffix += 1
+            candidate = f"{base}#{suffix}"
+        next_suffix[base] = suffix + 1
+        labels.append(candidate)
+        assigned.add(candidate)
     return tuple(labels)
 
 
