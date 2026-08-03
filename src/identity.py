@@ -5,8 +5,9 @@ The policy, stated so a check can enforce it:
 1. A row's company identity is its ``company_id`` as text, stripped. Rows
    sharing that value are one company.
 2. A row whose ``company_id`` is missing, null, or blank after stripping has
-   *no* identity. It is never merged with any other row: each such row is one
-   company on its own, flagged unidentified.
+   *no* identity. It is never merged with any other row: its *occurrence* in
+   the upload — not its uploaded ``id``, which no upload guarantees to be
+   unique — is what makes it one company on its own, flagged unidentified.
 3. Nothing else merges or splits rows. Name and domain are evidence. They are
    reported as conflicts and never used to decide identity.
 
@@ -37,12 +38,46 @@ def row_label(row: dict[str, Any], index: int) -> str:
     return _text(row.get("id")) or f"row-at-index-{index}"
 
 
-def identity_of(row: dict[str, Any], index: int) -> tuple[str, bool]:
-    """Return ``(key, identified)`` for one row under the policy above."""
+def unique_row_labels(rows: list[dict[str, Any]]) -> tuple[str, ...]:
+    """Per-row labels that are unique across the whole upload.
+
+    ``row_label`` trusts the uploaded ``id``, but nothing guarantees an upload
+    gives distinct ids. Two rows sharing one id would otherwise be
+    indistinguishable in a deliverable, and — for unidentified rows, whose key
+    is built from the label — would merge into a single company in violation of
+    rule 2. Labels seen exactly once are left alone so the common upload reads
+    naturally; a repeated label gets ``#0``, ``#1``, ... on every occurrence in
+    order, so no row silently borrows another's provenance.
+    """
+    bases = [row_label(row, index) for index, row in enumerate(rows)]
+    counts: dict[str, int] = {}
+    for base in bases:
+        counts[base] = counts.get(base, 0) + 1
+    seen: dict[str, int] = {}
+    labels: list[str] = []
+    for base in bases:
+        if counts[base] == 1:
+            labels.append(base)
+            continue
+        occurrence = seen.get(base, 0)
+        seen[base] = occurrence + 1
+        labels.append(f"{base}#{occurrence}")
+    return tuple(labels)
+
+
+def identity_of(
+    row: dict[str, Any], index: int, label: str | None = None
+) -> tuple[str, bool]:
+    """Return ``(key, identified)`` for one row under the policy above.
+
+    ``label`` lets a caller that already resolved upload-wide unique labels
+    pass one in; without it the row's own label is used, which is only safe
+    when uploaded ids are known to be distinct.
+    """
     company_id = _text(row.get(IDENTITY_FIELD))
     if company_id:
         return company_id, True
-    return f"unidentified:{row_label(row, index)}", False
+    return f"unidentified:{label or row_label(row, index)}", False
 
 
 def domain_of(row: dict[str, Any]) -> str:
@@ -143,6 +178,7 @@ class Inventory:
             "saved_template_id": template_id,
         }
         found: list[tuple[str, dict[str, Any], tuple[str, ...]]] = []
+        labels = unique_row_labels(list(self.rows))
         for index, row in enumerate(self.rows):
             conflicts = tuple(
                 field
@@ -151,7 +187,7 @@ class Inventory:
                 and (wanted[field] is None or _text(row[field]) != wanted[field])
             )
             if conflicts:
-                found.append((row_label(row, index), row, conflicts))
+                found.append((labels[index], row, conflicts))
         return tuple(found)
 
     def contested_row_labels(
@@ -180,9 +216,11 @@ def build_inventory(rows: list[dict[str, Any]]) -> Inventory:
     grouped: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     identified: dict[str, bool] = {}
 
+    labels = unique_row_labels(rows)
     for index, row in enumerate(rows):
-        key, is_identified = identity_of(row, index)
-        grouped.setdefault(key, []).append((row_label(row, index), row))
+        label = labels[index]
+        key, is_identified = identity_of(row, index, label)
+        grouped.setdefault(key, []).append((label, row))
         identified[key] = is_identified
 
     companies = tuple(
