@@ -427,8 +427,12 @@ class DomainSelectionTests(unittest.TestCase):
                 ]
                 self.assertEqual(blank, [])
 
-    def test_missing_domain_stops_campaign_construction(self) -> None:
-        """A landing page with no address must never be represented as shipped."""
+    def test_a_company_with_no_domain_still_ships_and_is_noted(self) -> None:
+        """No company is blocked; a missing address is reported, not fatal.
+
+        One unusable row must not cost the customer the rest of the campaign,
+        so the company is campaigned and named in `domain_notes` for a human.
+        """
         upload = [
             {
                 "id": "r1",
@@ -437,8 +441,11 @@ class DomainSelectionTests(unittest.TestCase):
                 "domain": "",
             }
         ]
-        with self.assertRaisesRegex(ValueError, "no domain on file"):
-            plan_for(upload)
+        plan = plan_for(upload)
+        self.assertEqual(len(plan["deliverables"]), len(REQUIRED_ASSET_TYPES))
+        self.assertEqual(
+            [note["company"] for note in plan["domain_notes"]], ["identity-a"]
+        )
 
 
 class CoverageEvaluatorTests(unittest.TestCase):

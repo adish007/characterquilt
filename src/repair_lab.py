@@ -106,11 +106,6 @@ def _make_deliverables(
 
     for company in inventory.companies:
         domain, note = choose_domain(company, owners)
-        if not domain:
-            raise ValueError(
-                f"cannot build campaign for company {company.key}: "
-                "no domain on file"
-            )
         if note:
             notes.append(
                 {"company": company.key, "domain_used": domain, "note": note}
