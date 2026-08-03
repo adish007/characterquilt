@@ -1,0 +1,8 @@
+217 written in Readme, but seems to e different than that
+Seeing 223 in some places as well
+205/209 from claude
+
+- 223 rows in file but 217 actually have company_id
+- 203 distinct companies
+- 205 if you merge same domains
+
