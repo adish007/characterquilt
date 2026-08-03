@@ -202,7 +202,7 @@ The rule conflates two distinct signals. Separate them:
 
 | Signal | Meaning | Action |
 |---|---|---|
-| Same cursor sent twice | **stall** — the service is not progressing | stop, `complete=False`. **Never** use to discard rows |
+| Same cursor repeatedly returns no new content and fails to advance beyond the allowed replay retry | **stall** — the service is not progressing | stop, `complete=False`. **Never** discard first-seen rows |
 | Page content already held | **suspected replay** — not decidable alone | see below |
 
 **Replay is not decidable from the protocol.** Content-matching catches every
