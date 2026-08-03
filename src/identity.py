@@ -28,6 +28,10 @@ IDENTITY_FIELD = "company_id"
 # on what the request asked for.
 OVERRIDE_FIELDS = ("saved_brand_kit_id", "saved_template_id")
 
+# Fields whose disagreement inside one identity is substantive. `company_name`
+# is excluded on purpose: it varies cosmetically on almost every duplicate.
+CONFLICT_FIELDS = ("domain", "segment")
+
 
 def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
@@ -148,6 +152,35 @@ class Inventory:
             c for c in self.identified if len({d for d in c.domains if d}) > 1
         )
 
+    def attribute_conflicts(
+        self, fields: tuple[str, ...] = CONFLICT_FIELDS
+    ) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
+        """Rows grouped as one company that disagree on a substantive field.
+
+        Returns `(company key, field, the differing values)`.
+
+        A reused `company_id` is the failure this guards: two genuinely
+        different customers under one identity would otherwise be merged in
+        silence, and a conflicting `domain` decides which website the creative
+        personalizes against. `company_name` is deliberately not checked --
+        `Inc` suffixes and capitalisation differ constantly and mean nothing,
+        so including it would bury the signal it exists to find.
+
+        Expect this to report nothing on most uploads. Silence is the point:
+        a guard that never fires on the data it was written against cannot
+        have been fitted to it.
+        """
+        found: list[tuple[str, str, tuple[str, ...]]] = []
+        for company in self.identified:
+            for field in fields:
+                seen: dict[str, None] = {}
+                for row in company.rows:
+                    seen.setdefault(_text(row.get(field)).lower(), None)
+                values = tuple(v for v in seen if v)
+                if len(values) > 1:
+                    found.append((company.key, field, values))
+        return tuple(found)
+
     @property
     def domain_spans_ids(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
         """One domain, several identities. Merging these would delete companies."""
@@ -209,6 +242,42 @@ class Inventory:
         ):
             labels.add(label)
         return tuple(sorted(labels))
+
+
+    def contested_summary(
+        self,
+        *,
+        brand_kit_id: str | None = None,
+        template_id: str | None = None,
+    ) -> dict[str, int]:
+        """What a human needs in order to decide whether to trust the count.
+
+        A single number cannot answer "is this campaign complete", because the
+        two uploads do not have the same shape of answer: one carries contested
+        identities and request overrides, the other legitimately carries none.
+        A report whose contested section is empty is a result, not a gap.
+        """
+        return {
+            "logical companies": self.company_count,
+            "unidentified companies": len(self.unidentified),
+            "companies named more than once": len(self.duplicated),
+            "extra rows absorbed": self.extra_rows,
+            "contested identity relationships": len(self.domain_spans_ids),
+            "one identity, several domains": len(self.id_spans_domains),
+            "attribute conflicts within one identity": len(
+                self.attribute_conflicts()
+            ),
+            "rows overriding the request": len(
+                self.override_rows(
+                    brand_kit_id=brand_kit_id, template_id=template_id
+                )
+            ),
+            "rows a human must review": len(
+                self.contested_row_labels(
+                    brand_kit_id=brand_kit_id, template_id=template_id
+                )
+            ),
+        }
 
 
 def build_inventory(rows: list[dict[str, Any]]) -> Inventory:
