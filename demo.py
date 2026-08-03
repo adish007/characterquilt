@@ -19,6 +19,7 @@ def _run(accounts: list[dict], request: dict, page_size: int) -> dict:
         brand_kit_id=request["brand_kit"]["id"],
         template_id=request["template"]["id"],
         page_size=page_size,
+        expected_row_count=len(accounts),
     )
     deliverables = plan["deliverables"]
     kits: dict[str, int] = {}
@@ -71,8 +72,14 @@ def main() -> None:
         TargetAccountTool(accounts),
         brand_kit_id=request["brand_kit"]["id"],
         template_id=request["template"]["id"],
+        expected_row_count=len(accounts),
     )
-    passed, detail = evaluate_campaign_coverage(plan, accounts)
+    passed, detail = evaluate_campaign_coverage(
+        plan,
+        accounts,
+        brand_kit_id=request["brand_kit"]["id"],
+        template_id=request["template"]["id"],
+    )
     print()
     print(f"shipped check returned        : {passed}")
     print(f"shipped check said            : {detail}")

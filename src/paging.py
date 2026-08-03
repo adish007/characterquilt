@@ -29,9 +29,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from repair_lab import AccountPageLoader
+if TYPE_CHECKING:  # `repair_lab` imports this module, so only type-check it.
+    from repair_lab import AccountPageLoader
 
 # Stop of last resort. A cursor that neither advances nor repeats a page we
 # have already ingested would otherwise page forever.

@@ -23,8 +23,14 @@ class SuppliedEvaluatorSmokeTest(unittest.TestCase):
             TargetAccountTool(accounts),
             brand_kit_id=request["brand_kit"]["id"],
             template_id=request["template"]["id"],
+            expected_row_count=len(accounts),
         )
-        passed, detail = evaluate_campaign_coverage(plan, accounts)
+        passed, detail = evaluate_campaign_coverage(
+            plan,
+            accounts,
+            brand_kit_id=request["brand_kit"]["id"],
+            template_id=request["template"]["id"],
+        )
         self.assertTrue(passed, detail)
 
 

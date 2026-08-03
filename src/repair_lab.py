@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from identity import Company, Inventory, build_inventory
+from paging import collect_rows
 
 REQUIRED_ASSET_TYPES = (
     "landing_page",
@@ -141,9 +142,6 @@ def build_campaign_plan(
     Grouping happens after the whole read, so the answer cannot depend on page
     size -- the defect that made the same upload report 214, 214 and 211.
     """
-    # Deferred: paging imports the loader protocol from this module.
-    from paging import collect_rows
-
     read = collect_rows(
         tool, page_size=page_size, expected_row_count=expected_row_count
     )
@@ -182,22 +180,109 @@ def build_campaign_plan(
 def evaluate_campaign_coverage(
     plan: dict[str, Any],
     accounts: list[dict[str, Any]],
+    *,
+    brand_kit_id: str,
+    template_id: str,
+    page_sizes: tuple[int, ...] = (10, 25, 100),
 ) -> tuple[bool, str]:
-    """Interim check, carried over the plan's new shape. Rewritten in D.
+    """Reconcile a plan against the upload it claims to cover.
 
-    Still weak in the way the customer disputes: it only inspects what the plan
-    already contains, and so cannot notice a company that never arrived.
+    The check it replaces asked only whether rows *already in the plan* had
+    four assets each, so a plan holding a single row passed, and it finished by
+    echoing the plan's own `complete` flag. That is why a run that shipped six
+    duplicates and dropped six companies was reported as passing.
+
+    Nothing self-reported is trusted here. The expected companies are re-derived
+    from the upload through the loader interface, and the requested brand kit
+    and template come from the caller, not from the plan.
     """
-    by_company: dict[str, set[str]] = {}
-    for item in plan.get("deliverables", []):
-        by_company.setdefault(str(item["company_key"]), set()).add(
+    read = collect_rows(
+        TargetAccountTool(accounts), expected_row_count=len(accounts)
+    )
+    inventory = build_inventory(read.rows)
+    expected = {company.key for company in inventory.companies}
+    rows_of = {c.key: set(c.row_labels) for c in inventory.companies}
+    deliverables = plan.get("deliverables", [])
+
+    shipped: dict[str, list[str]] = {}
+    for item in deliverables:
+        shipped.setdefault(str(item["company_key"]), []).append(
             str(item["asset_type"])
         )
 
-    for key, asset_types in sorted(by_company.items()):
-        if asset_types != set(REQUIRED_ASSET_TYPES):
+    # 1 coverage, 3 no orphans
+    missing = expected - shipped.keys()
+    if missing:
+        return False, f"{len(missing)} companies never campaigned, e.g. {min(missing)}"
+    orphans = shipped.keys() - expected
+    if orphans:
+        return False, f"{len(orphans)} deliverables name no uploaded company, e.g. {min(orphans)}"
+
+    # 2 exactly one of each asset type, 4 no duplicates
+    for key, asset_types in sorted(shipped.items()):
+        if len(asset_types) != len(set(asset_types)):
+            return False, f"company {key} has duplicate deliverables"
+        if set(asset_types) != set(REQUIRED_ASSET_TYPES):
             return False, f"company {key} has the wrong asset set"
 
-    if plan.get("verified_complete") == "false":
-        return False, plan.get("completion_reason", "the read did not complete")
-    return True, f"all {len(by_company)} companies have the requested asset types"
+    # 5 attribution, 6 traceability
+    traced: set[str] = set()
+    for item in deliverables:
+        cited = set(item.get("source_row_ids", []))
+        if cited != rows_of[str(item["company_key"])]:
+            return False, f"deliverable for {item['company_key']} cites the wrong rows"
+        traced |= cited
+    untraced = {label for rows in rows_of.values() for label in rows} - traced
+    if untraced:
+        return False, f"{len(untraced)} uploaded rows reach no deliverable, e.g. {min(untraced)}"
+
+    # 7 request conformity -- unconditional. A reported override is still an
+    # override; the exceptions block records what was suppressed, it excuses
+    # nothing.
+    off_brand = [
+        item
+        for item in deliverables
+        if item.get("brand_kit_id") != brand_kit_id
+        or item.get("template_id") != template_id
+    ]
+    if off_brand:
+        return False, f"{len(off_brand)} deliverables do not use the requested brand kit or template"
+
+    # 8 the exceptions block names exactly the suppressed rows
+    declared = {str(e["source_row_id"]) for e in plan.get("exceptions", [])}
+    suppressed = {
+        label
+        for label, _, _ in inventory.override_rows(
+            brand_kit_id=brand_kit_id, template_id=template_id
+        )
+    }
+    if declared != suppressed:
+        return False, (
+            f"exceptions block lists {len(declared)} rows, "
+            f"{len(suppressed)} were actually suppressed"
+        )
+
+    # 9 determinism
+    for page_size in page_sizes:
+        other = build_campaign_plan(
+            TargetAccountTool(accounts),
+            brand_kit_id=brand_kit_id,
+            template_id=template_id,
+            page_size=page_size,
+            expected_row_count=len(accounts),
+        )
+        if len(other["companies"]) != len(expected):
+            return False, (
+                f"page size {page_size} gives {len(other['companies'])} companies, "
+                f"not {len(expected)}"
+            )
+
+    # 10 honesty -- our own read, never the plan's claim
+    if read.verified_complete != "true":
+        return False, f"the upload could not be read completely: {read.reason}"
+
+    return True, (
+        f"{len(expected)} companies from {len(read.rows)} rows, "
+        f"{len(deliverables)} deliverables, {len(declared)} exceptions, "
+        f"read verified against declared size {len(accounts)}"
+    )
