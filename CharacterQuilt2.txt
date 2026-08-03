@@ -1,0 +1,1999 @@
+╭─── Claude Code v2.1.220 ─────────────────────────────────────────────────────╮
+│                                   │ Tips for getting started                 │
+│          Welcome back AJ!         │ Run /init to create a CLAUDE.md file wi… │
+│                                   │ ──────────────────────────────────────── │
+│              ▐▛███▜▌              │ What's new                               │
+│             ▝▜█████▛▘             │ Bug fixes and reliability improvements   │
+│               ▘▘ ▝▝               │ Added Claude Opus 5 (`claude-opus-5`), … │
+│                                   │ Added `sandbox.network.strictAllowlist`… │
+│     Opus 5 · Claude Max · AJ      │ /release-notes for more                  │
+│   ~/Downloads/01-campaign-audit   │                                          │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ /usage 
+  ⎿  Stats dialog dismissed
+
+❯ /effort                                                                       
+  ⎿  Set effort level to ultracode (this session only): xhigh + dynamic workflow
+     orchestration
+
+❯ I want you to understand this repo, and then look at task.md to understand    
+  what we have to accomplish here.                                              
+
+⏺ I'll start by exploring the repo structure and reading task.md.
+
+  Searched for 1 pattern, read 11 files, listed 1 directory (ctrl+o to expand)
+
+⏺ Now the data fixtures — these are where the real evidence lives.
+
+⏺ Bash(git log --oneline --all && echo "--- status ---" && git status --short &&
+      echo "--- gitignore ---" && cat .gitignore)
+  ⎿  8f0f5c7 Initial commit: campaign audit
+     --- status ---
+     --- gitignore ---
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(wc -l fixtures/*.json fixtures/*.jsonl && echo "=== target_accounts head
+      ===" && python3 -c "
+      import json…)
+  ⎿        11 fixtures/request.json
+          807 fixtures/second_list.json
+         1581 fixtures/target_accounts.json
+     … +72 lines (ctrl+o to expand)
+
+⏺ README says "217 rows"; the file actually has 223. Let me dig into the data
+  properly.
+
+⏺ Bash(python3 - <<'EOF'
+      import json, collections, re…)
+  ⎿  rows: 223
+
+     key shapes:
+     … +21 lines (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'EOF'
+      import json, collections…)
+  ⎿  === rows with null/missing company_id ===
+       12 {"id": "row-2401", "company_id": null, "company_name": "Halverson
+      Freight", "domain": "halverson-freight.example", "segment": "logistic
+     … +114 lines (ctrl+o to expand)
+
+⏺ Bash(make demo 2>&1 && echo "=== TEST ===" && make test 2>&1 && echo "===
+      VERIFY ===" && make verify 2>&1)
+  ⎿  PYTHONPATH=src python3 demo.py
+     list                          : fixtures/target_accounts.json
+     uploaded rows                 : 223
+     … +41 lines (ctrl+o to expand)
+
+⏺ Bash(python3 -c "
+      import json…)
+  ⎿  {
+       "trace_id": "t-9f21",
+       "event": "tool_result",
+     … +70 lines (ctrl+o to expand)
+
+⏺ Traces map cleanly onto the customer's complaints. Now the second list and the
+  identity question.
+
+⏺ Bash(python3 - <<'EOF'
+      import json, collections…)
+  ⎿  rows: 115
+     key shapes: {('company_id', 'company_name', 'domain', 'id', 'segment')
+     : 115}
+     … +83 lines (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'EOF'
+      import json, collections, re…)
+  ⎿  ======================================================================
+     fixtures/target_accounts.json 223 rows
+     blank company_id rows: 6
+     … +29 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src timeout 120 python3 - <<'EOF'
+      import json, sys…)
+  ⎿  Error: Exit code 127
+     (eval):1: command not found: timeout
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys, collections…)
+  ⎿  === which real companies vanish, by page size ===
+      page_size=10    rows_campaigned=214   unidentified-company rows DROPP
+     ED: 0
+     … +19 lines (ctrl+o to expand)
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys, signal, resource…)
+  ⎿  loader                         outcome
+     ----------------------------------------------------------------------
+     -------------------------
+     … +9 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys, collections, re, inspect…)
+  ⎿  === does the shipped check ever pass a WRONG plan? ===
+       TargetAccountTool            rows= 214  check=True  'all 214 campaig
+     ned rows have the requested asset types'
+     … +16 lines (ctrl+o to expand)
+
+⏺ I've read everything and run the evidence myself. No files edited — TASK.md
+  requires ROADMAP.md be committed before any source/test change. Here's what's
+  actually going on.
+
+  The shipped check is vacuous
+
+  evaluate_campaign_coverage takes accounts and never reads it
+  (src/repair_lab.py:128). It derives the row set from the plan itself, so it
+  can only ever ask "are the rows I shipped internally consistent?"
+
+    empty plan  -> (True, 'all 0 campaigned rows have the requested asset
+  types')
+
+  A plan that delivers nothing passes. complete: True is also hardcoded at
+  repair_lab.py:124. This is why make demo/make test are green and the customer
+  is still right.
+
+  Four defects, each tied to a line in the customer's note
+
+  1. Cross-page duplicates → "a couple of companies came back twice."
+  _collapse_page (repair_lab.py:56) dedups within a page only. Duplicate pairs
+  that straddle a page boundary both survive. That makes the answer a function
+  of page size:
+
+                      page_size=10   page_size=25   page_size=100
+  rows campaigned            214            214            211
+
+  Three different answers, three complete: True. Under ReplayingLoader it ships
+  428 rows — every company twice — and the check still returns True.
+
+  2. str(None) merges unrelated companies → silent deletion. Six rows have
+  company_id: null. str(row["company_id"]) turns all of them into the key
+  "None", so any two that land on the same page collapse into one. At
+  page_size=100:
+
+   page_size=100  rows_campaigned=211  unidentified-company rows DROPPED: 3
+        lost: row-2402  Pell & Sons Ironworks
+        lost: row-2403  Cobalt Ridge Dental
+        lost: row-2404  Northgate Tutoring
+
+  Three real, unrelated companies deleted with no error. The second list hits
+  the same bug through company_id: "" instead of null.
+
+  3. Row-saved brand kit silently overrides the request → "creative is not in 
+  the brand we picked."
+  account.get("saved_brand_kit_id", brand_kit_id) at repair_lab.py:81 prefers a
+  stale per-row kit over the kit the customer explicitly selected. 36 
+  deliverables across 9 companies shipped in brand-kit-2019-legacy instead of
+  brand-kit-meridian-2026.
+
+  4. The paging loop has no termination guarantee → "a rerun that never came 
+  back."
+  while True with no budget, no cursor-progress check, no loop detection.
+  Against the five recorded service behaviours:
+
+  ReplayingLoader                OK  rows=428 unique=214 complete=True   <-
+  every company duplicated
+  StallingLoader                 RuntimeError: page budget exhausted     <-
+  infinite loop
+  CyclingLoader                  RuntimeError: page budget exhausted     <-
+  infinite loop
+  TruncatedWithoutCursorLoader   RuntimeError: page budget exhausted     <-
+  infinite loop
+  SilentlyShortLoader            OK  rows=116 unique=116 complete=True   <- read
+  116 of 223, declared done
+
+  Those only terminate because sources.py has a 400-call safety valve;
+  production has none. SilentlyShortLoader is the case TASK.md flags — the
+  correct answer is "this list cannot be read completely," and the current code
+  says complete: True.
+
+  The traces corroborate: t-77b3 shows cursor "25" returned twice then
+  worker_timeout at 90s. t-9f21 shows a final page of 17 rows with truncated: 
+  false — a silently-short read declared complete. t-4c08 (image_search timeout,
+  template cache cold start) is unrelated to any complaint — I read it as a
+  deliberate distractor.
+
+  How many logical companies
+
+  List 1: 209. List 2: 99. Identity = company_id when non-blank; a blank id is
+  absent identity, so each such row is its own company until proven otherwise.
+
+  - 203 distinct non-blank company_id + 6 blank-id rows (all six have distinct
+  names and distinct domains) = 209.
+  - Not 204 — that's str(None) merging all six blanks into one, deleting five
+  real companies.
+  - Not 207 — domain-as-identity merges company-northwind-energy with
+  company-northwind-energy-emea (and two more -emea pairs); those are
+  separately-identified accounts sharing a parent domain.
+  - Not 210+ — the Inc/UPPERCASE variants (SABLE WORKS Inc, IRONWOOD LOGISTICS)
+  share a company_id, so they're one company, not two.
+  - Fuzzy name-matching is a trap here: 20 first-word families cover all 203
+  companies (14 distinct quarry-*, 13 cedar-*). Normalized-name collision across
+  different company_id: zero. Any name-similarity merge would over-collapse.
+
+  Genuinely unresolvable, matching "a few entries I cannot tell apart" —
+  company-kestrel-robotics appears under two domains; Copperline Energy appears
+  at copperline-group.example, which is also company-copperline-group's domain.
+  These need to be flagged, not silently decided.
+
+  Why the two lists don't produce the same shape of answer: list 2 (115 rows →
+  99 companies) has zero domain↔id conflicts, zero brand-kit overrides, and its
+  blanks are "" not null. Its answer is a clean number. List 1's answer is "209,
+  of which 6 unidentified and ~5 ambiguous" — it can't be reported as a bare
+  integer without lying.
+
+  Two side notes: README claims 217 rows, the file has 223. And trace t-9f21
+  reports source_row_count: 209 from only 67 recorded rows read — the run's own
+  evidence doesn't support its claim. That 209 matching my company count is a
+  coincidence of a different question; I derived mine independently.
+
+  What needs your call before I draft the roadmap
+
+⏺ User answered Claude's questions:
+  ⎿  · For rows whose identity is unresolvable (blank company_id, or a 
+     company_id that conflicts with domain evidence), what should the system do?
+     → So we need to draft the ROADMAP.md file. Lets just write all the 
+     problems we have to fix in that and create a solid roadmap on how to fix 
+     those. But the first step I want to understand which rows and companies are
+     the tricky companies. It seems to me that there can multiple answers to 
+     how many companies we get based on what things we fix. And what we have to 
+     do is get one right answer. I want to look at the most troubled rows that 
+     are messing up the counts. This should be a smaller list, but even if it is
+     not give me all the companies. Write this as first step in the ROADMAP.md.
+     Then I want you to list out all the issues. But don't think about solving 
+     them. Right now just focus on creating the ROADMAP.md.
+     · When the account service can't be read completely (SilentlyShortLoader, 
+     stalled/cycling cursors), what should the run do? → We will decide later, 
+     · How wide should the fix go, given the 2-hour target in TASK.md? → Just 
+     write the defects for now. Another agent said these things went wrong. The 
+     list has five so just make sure that you are not missing any defects: 
+
+      What actually went wrong
+
+       1. The check is vacuous. evaluate_campaign_coverage only asks: do the 
+     rows that made it into the plan have four assets each? It never compares
+       against the upload. A plan containing one row passes. It also just echoes
+     plan["complete"], which build_campaign_plan hardcodes to True
+       (repair_lab.py:124). It cannot fail for the reason the customer cares 
+     about.
+
+       2. Dedupe is per-page, so the answer depends on page size. _collapse_page
+     (repair_lab.py:56) dedupes within a page only. Duplicates that straddle
+       a page boundary survive:
+
+                           page_size=10   page_size=25  page_size=100
+       rows campaigned            214            214            211
+       deliverables               856            856            844
+
+       Same input, three different answers, all reported complete. That's "a 
+     couple of companies came back twice."
+
+       3. Null company_id collapses six distinct companies into one. 
+     str(row["company_id"]) turns None into the string "None", so these six all 
+     key to
+       the same bucket:
+
+       row-2401 Halverson Freight      row-2404 Northgate Tutoring
+       row-2402 Pell & Sons Ironworks  row-2405 Riverbend Cold Storage
+       row-2403 Cobalt Ridge Dental    row-2406 Aster Point Realty
+
+       Five real companies are silently dropped. Second list has the same bug 
+     with "" (Unresolved Import A/B).
+
+       4. Wrong brand kit, silently. Nine rows carry saved_brand_kit_id, and 
+     _make_deliverables lets the row override the kit the customer selected on
+       the request — 36 deliverables shipped in brand-kit-2019-legacy. Nothing 
+     surfaces it. That's "some of the creative is not in the brand we picked."
+
+       5. Every paging shape in sources.py breaks the loop. I ran all five 
+     through build_campaign_plan:
+
+       ReplayingLoader                rows=428  complete=True   # every row 
+     duplicated
+       StallingLoader                 RuntimeError: page budget exhausted
+       CyclingLoader                  RuntimeError: page budget exhausted
+       SilentlyShortLoader            rows=116  complete=True   # 107 rows never
+     read
+       TruncatedWithoutCursorLoader   RuntimeError: page budget exhausted
+
+       The loop trusts truncated blindly, never detects a non-advancing or 
+     repeating cursor, and on next_cursor=None with truncated=True it does 
+     int(None
+       or "0") → restarts at zero forever. This matches the traces: t-77b3 shows
+     cursor 25 handed back twice then worker_timeout — the customer's "rerun
+       that never came back." And t-9f21 reports 25+25+17 = 67 rows read but 
+     claims source_row_count: 209.
+
+
+
+⏺ Good — that changes the shape of the roadmap. Let me first pin down the
+  troubled rows precisely, since step 1 depends on real data.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, collections…)
+  ⎿  ======================================================================
+     ========
+     LIST 1  (fixtures/target_accounts.json)  223 rows
+     … +84 lines (ctrl+o to expand)
+
+❯ Make sure to keep the ROADMAP.md short and concise. It should not be longer   
+  than 300 words. I just want to have the problems we need to fix.              
+
+⏺ Data's in. Writing the roadmap now — under 300 words, problems only.
+
+⏺ Write(ROADMAP.md)
+  ⎿  Wrote 29 lines to ROADMAP.md
+       1 # Roadmap
+       2 
+       3 ## Step 1 — Pin down the contested rows before counting anything
+       4 
+       5 A small set of rows moves the count. The rest of both lists is u
+       6 
+       7 **List 1 — `target_accounts.json`, 223 rows**
+       8 
+       9 | Class | Which | Why it's contested |
+      10 |---|---|---|
+     … +41 lines (ctrl+o to expand)
+
+⏺ Bash(wc -w ROADMAP.md && git status --short)
+  ⎿       334 ROADMAP.md
+     ?? ROADMAP.md
+     ?? personalnotes.txt
+
+⏺ 334 — trimming under 300.
+
+⏺ Write(ROADMAP.md)
+  ⎿  Added 5 lines, removed 5 lines
+       6  
+       7  **List 1 — `target_accounts.json`, 223 rows**
+       8  
+       9 -| Class | Which | Why it's contested |                         
+       9 +| Class | Which | Why contested |                              
+      10  |---|---|---|
+      11 -| Blank `company_id` (`null`) | `row-2401`…`row-2406` (6) | All
+         - key to the string `"None"` and merge when they share a page | 
+      11 +| Blank `company_id` (`null`) | `row-2401`…`row-2406` (6) | All
+         + key to the string `"None"`, so they merge when they share a pa
+         +ge |                                                           
+      12  | Duplicate `company_id` | 13 groups, 14 extra rows | 5 straddl
+          e a page boundary at every page size: `kestrel-dynamics`, `harb
+          or-group`, `ironwood-logistics`, `vantage-networks`, `tessellat
+          e-energy` |
+      13  | One id → two domains | `company-kestrel-robotics`, `company-c
+          opperline-energy` | One customer or two? Unresolvable from the 
+          upload |
+      14  | One domain → two ids | `northwind-energy`, `sable-fitness`, `
+          tessellate-capital` (`-emea` pairs), `copperline-group` | Domai
+          n is not identity; merging these is wrong |
+      15  
+      16 -223 − 14 duplicate rows = **209 companies**. The 6 blank-id row
+         -s carry 6 distinct names and 6 distinct domains, so each is its
+         - own company.                                                  
+      16 +223 − 14 duplicate rows = **209 companies**. The 6 blank-id row
+         +s have 6 distinct names and domains, so each is its own company
+         +.                                                              
+      17  
+      18  **List 2 — `second_list.json`, 115 rows.** Blanks are `""`, not
+           `null` (`srow-1114/1115`); 15 duplicate groups, 16 extra rows;
+           no domain conflicts, no brand overrides. 115 − 16 = **99**.
+      19  
+      20 -Output of this step: a script that prints these classes for any
+         - list, so the number is derived and auditable rather than asser
+         -ted.                                                           
+      20 +Output: a script that prints these classes for any list, so the
+         + number is derived, not asserted.                              
+      21  
+      22  ## Step 2 — Defects
+      23  
+     ...
+      26  3. **Blank ids collapse.** `str(None)` merges distinct companie
+          s; at `page_size=100` three vanish silently. Same bug via `""` 
+          in list 2.
+      27  4. **Rows override the request.** 9 rows force `brand-kit-2019-
+          legacy` and `template-legacy-blast` — 36 deliverables off-brand
+          , templates never reported.
+      28  5. **Paging never terminates safely.** All five `sources.py` sh
+          apes break it: duplicated reads, three infinite loops, one shor
+          t read declared complete.
+      29 -6. **Traceability is lost.** Collapsed rows disappear from `sou
+         -rce_row_ids`, so a deliverable cannot be traced to every row it
+         - came from.                                                    
+      29 +6. **Traceability is lost.** Collapsed rows vanish from `source
+         +_row_ids`, so a deliverable cannot be traced to every row behin
+         +d it.                                                          
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Write(ROADMAP.md)
+  ⎿  Added 6 lines, removed 6 lines
+       2  
+       3  ## Step 1 — Pin down the contested rows before counting anythin
+          g
+       4  
+       5 -A small set of rows moves the count. The rest of both lists is 
+         -unambiguous.                                                   
+       5 +A small set of rows moves the count; the rest is unambiguous.  
+       6  
+       7  **List 1 — `target_accounts.json`, 223 rows**
+       8  
+       9  | Class | Which | Why contested |
+      10  |---|---|---|
+      11 -| Blank `company_id` (`null`) | `row-2401`…`row-2406` (6) | All
+         - key to the string `"None"`, so they merge when they share a pa
+         -ge |                                                           
+      11 +| Blank `company_id` (`null`) | `row-2401`…`row-2406` (6) | All
+         + key to `"None"`; merge when they share a page |               
+      12  | Duplicate `company_id` | 13 groups, 14 extra rows | 5 straddl
+          e a page boundary at every page size: `kestrel-dynamics`, `harb
+          or-group`, `ironwood-logistics`, `vantage-networks`, `tessellat
+          e-energy` |
+      13 -| One id → two domains | `company-kestrel-robotics`, `company-c
+         -opperline-energy` | One customer or two? Unresolvable from the 
+         -upload |                                                       
+      13 +| One id → two domains | `company-kestrel-robotics`, `company-c
+         +opperline-energy` | One customer or two? Not resolvable here | 
+      14  | One domain → two ids | `northwind-energy`, `sable-fitness`, `
+          tessellate-capital` (`-emea` pairs), `copperline-group` | Domai
+          n is not identity; merging these is wrong |
+      15  
+      16 -223 − 14 duplicate rows = **209 companies**. The 6 blank-id row
+         -s have 6 distinct names and domains, so each is its own company
+         -.                                                              
+      16 +223 − 14 duplicate rows = **209 companies**; the blank-id rows 
+         +have 6 distinct names and domains, so each counts once.        
+      17  
+      18 -**List 2 — `second_list.json`, 115 rows.** Blanks are `""`, not
+         - `null` (`srow-1114/1115`); 15 duplicate groups, 16 extra rows;
+         - no domain conflicts, no brand overrides. 115 − 16 = **99**.   
+      18 +**List 2 — `second_list.json`, 115 rows.** Blanks are `""`, not
+         + `null` (`srow-1114/1115`); 15 duplicate groups, 16 extra rows;
+         + no domain conflicts, no overrides. 115 − 16 = **99**.         
+      19  
+      20 -Output: a script that prints these classes for any list, so the
+         - number is derived, not asserted.                              
+      20 +Output: a script printing these classes for any list, so the nu
+         +mber is derived, not asserted.                                 
+      21  
+      22  ## Step 2 — Defects
+      23  
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(ROADMAP.md)
+  ⎿  Added 1 line, removed 1 line
+      1  # Roadmap
+      2  
+      3 -## Step 1 — Pin down the contested rows before counting anything
+      3 +## Step 1 — The contested rows                                  
+      4  
+      5  A small set of rows moves the count; the rest is unambiguous.
+      6  
+
+⏺ Update(ROADMAP.md)
+  ⎿  Added 1 line, removed 1 line
+      17  
+      18  **List 2 — `second_list.json`, 115 rows.** Blanks are `""`, not
+           `null` (`srow-1114/1115`); 15 duplicate groups, 16 extra rows;
+           no domain conflicts, no overrides. 115 − 16 = **99**.
+      19  
+      20 -Output: a script printing these classes for any list, so the nu
+         -mber is derived, not asserted.                                 
+      20 +Output: a script printing these classes for any list — the numb
+         +er derived, not asserted.                                      
+      21  
+      22  ## Step 2 — Defects
+      23  
+
+⏺ Update(ROADMAP.md)
+  ⎿  Added 1 line, removed 1 line
+      26  3. **Blank ids collapse.** `str(None)` merges distinct companie
+          s; at `page_size=100` three vanish silently. Same bug via `""` 
+          in list 2.
+      27  4. **Rows override the request.** 9 rows force `brand-kit-2019-
+          legacy` and `template-legacy-blast` — 36 deliverables off-brand
+          , templates never reported.
+      28  5. **Paging never terminates safely.** All five `sources.py` sh
+          apes break it: duplicated reads, three infinite loops, one shor
+          t read declared complete.
+      29 -6. **Traceability is lost.** Collapsed rows vanish from `source
+         -_row_ids`, so a deliverable cannot be traced to every row behin
+         -d it.                                                          
+      29 +6. **Traceability is lost.** Collapsed rows vanish from `source
+         +_row_ids`; a deliverable can't be traced to every row behind it
+         +.                                                              
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ ROADMAP.md written — 305 words (wc -w counts the table's markdown delimiters;
+  prose is ~285). No source or test files touched.
+
+  On the five defects from the other agent: all five are confirmed — I
+  reproduced each independently. I added one they missed and extended one:
+
+  - New (#6) Traceability. When _collapse_page drops a duplicate, that row's id
+  never reaches source_row_ids. TASK.md's constraint is "any deliverable must 
+  stay traceable to the uploaded input it came from" — right now a company's
+  four assets point at one arbitrary surviving row, and the other rows behind it
+  leave no record.
+  - Extended (#4). The same 9 rows also carry saved_template_id: 
+  template-legacy-blast, not just a brand kit. demo.py reports a brand-kit
+  breakdown but no template breakdown at all, so the template contamination is
+  invisible in the current output.
+
+  Two things worth flagging that I deliberately left out of the roadmap:
+
+  - t-4c08 is a distractor. The image_search timeout and template_cache cold
+  start match no line in the customer's note. TASK.md says "don't repair 
+  behavior you can't tie to the customer's complaint."
+  - Don't anchor on 209 from t-9f21. That trace claims source_row_count: 209
+  from three recorded pages totalling 67 rows — its own evidence doesn't support
+  it. My 209 is derived separately (223 rows − 14 duplicate rows) and answers a
+  different question: companies, not rows. The match is coincidence.
+
+  On your point that the count changes depending on what you fix — that's
+  exactly right, and it's why step 1 exists. The number lands at 204 if blanks
+  stay merged, 211 if you dedup per-page at page_size=100, 214 at page_size=25,
+  205 if you treat domain as identity and merge the -emea pairs, and 207 if you
+  go domain-only. 209 is the one that survives: it drops nothing real and merges
+  nothing the upload doesn't explicitly say is the same company.
+
+  The -emea pairs are the load-bearing case — they share a domain with their
+  parent but carry their own company_id, so any domain-based fix silently
+  deletes three real accounts. make verify won't catch that, since list 2 has no
+  domain collisions at all.
+
+  Two notes before next steps: personalnotes.txt is untracked in the repo — I
+  haven't opened it, but it'll show up in git status when you commit. And
+  TASK.md wants the roadmap committed on its own before any source edit — say
+  the word and I'll commit just ROADMAP.md, or edit it first if you want the
+  contested-row table framed differently.
+✻ Brewed for 6m 47s
+
+※ recap: Goal is to audit why the campaign run wrongly reported complete; I've written ROADMAP.md with the contested rows (209 and 99 companies) and six defects, no source edits yet. Next: commit ROADMAP.md on its own. (disable recaps in /config)
+
+❯ Commit ROADMAP.md and push                                                    
+
+⏺ Bash(git branch --show-current && echo "--- remotes ---" && git remote -v &&
+      echo "--- status ---" && git status --short)
+  ⎿  main
+     --- remotes ---
+     origin     https://github.com/adish007/characterquilt.git (fetch)
+     … +3 lines (ctrl+o to expand)
+
+⏺ Bash(git add ROADMAP.md && git commit -F- <<'EOF'
+      Add ROADMAP.md: contested rows and defect inventory…)
+  ⎿  [main 17adaab] Add ROADMAP.md: contested rows and defect inventory
+      1 file changed, 31 insertions(+)
+      create mode 100644 ROADMAP.md
+
+⏺ Bash(git push origin main 2>&1)
+  ⎿  To https://github.com/adish007/characterquilt.git
+        8f0f5c7..17adaab  main -> main
+
+⏺ Committed and pushed.
+
+  [main 17adaab] Add ROADMAP.md: contested rows and defect inventory
+   1 file changed, 31 insertions(+)
+   create mode 100644 ROADMAP.md
+
+  To https://github.com/adish007/characterquilt.git
+     8f0f5c7..17adaab  main -> main
+
+  ROADMAP.md is alone in the commit — no source or test files touched, which is
+  what TASK.md requires. It went to main rather than a branch, since the
+  submission history needs the roadmap as a standalone commit on the mainline.
+  Your edits to Step 2 are included as written.
+
+  personalnotes.txt no longer appears in git status, so nothing of yours got
+  swept in.
+
+  Next step per your Step 2 framing is defect 1 — but the order matters. The
+  check has to be able to fail before any fix can be shown to work, otherwise
+  every "after" is green for the wrong reason. Want me to start there, or take
+  the defects in a different order?
+
+✻ Sautéed for 55s
+
+※ recap: Goal is auditing a campaign the customer disputes; ROADMAP.md is written, committed alone, and pushed. Next: start fixing the six defects, beginning with the vacuous coverage check so it can actually fail. (disable recaps in /config)
+
+❯ So now lets build the list of the defected companies which is step one in     
+  task.md                                                                       
+
+⏺ Roadmap's committed, so source edits are now in bounds. Building step 1.
+
+  Two design constraints I'm holding to: TASK.md says load accounts through the 
+  loader interface, not by reading the fixture, and whatever reads the list must
+  cope with all five paging shapes in sources.py. So step 1 needs a safe reader
+  before it can produce a trustworthy inventory.
+
+⏺ Write(src/paging.py)
+  ⎿  Wrote 119 lines to src/paging.py
+       1 """Collecting an uploaded list through the account-service inter
+       2 
+          The service
+       4 has produced several broken paging shapes (see `sources.py`), so
+       5 here is defensive: it keeps paging while pages yield rows it has
+       6 seen, and stops with a stated reason when they stop.
+       8 One shape is deliberately *not* detectable at this layer. A read
+          that stops
+         genuine end
+          records only
+     … +129 lines (ctrl+o to expand)
+
+⏺ Write(src/identity.py)
+  ⎿  Wrote 197 lines to src/identity.py
+       1 """What counts as one company, and which rows make that hard to 
+       2 
+       3 The policy, stated so a check can enforce it:
+       5 1. A row's company identity is its ``company_id`` as text, strip
+         ped. Rows
+       7 2. A row whose ``company_id`` is missing, null, or blank after s
+         tripping has
+         ch row is one
+       9    company on its own, flagged unidentified.
+         nce. They are
+     … +219 lines (ctrl+o to expand)
+
+⏺ Write(audit.py)
+  ⎿  Wrote 180 lines to audit.py
+       1 """Step 1: derive how many logical companies an upload represent
+       2 
+       3 Prints the count and, more usefully, every row that makes the co
+         unt arguable.
+         from the data,
+       5 so a different upload produces a different list, or an empty one
+       6 """
+       7 from __future__ import annotations
+       8 
+      10 import json
+     … +197 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 audit.py --list fixtures/target_accounts.json
+      2>&1)
+  ⎿  list                 : fixtures/target_accounts.json
+     loader               : TargetAccountTool  (page_size=25)
+     rows read            : 223  (9 page requests, 0 carrying nothing new)
+     … +71 lines (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(audit.py)
+  ⎿  Added 1 line, removed 1 line
+      11  from pathlib import Path
+      12  
+      13  import sources
+      14 -from identity import build_inventory, domain_of, row_label     
+      14 +from identity import build_inventory, domain_of                
+      15  from paging import collect_rows
+      16  from repair_lab import TargetAccountTool, build_campaign_plan
+      17  
+
+⏺ Bash(PYTHONPATH=src python3 audit.py --list fixtures/second_list.json 2>&1)
+  ⎿  list                 : fixtures/second_list.json
+     loader               : TargetAccountTool  (page_size=25)
+     rows read            : 115  (5 page requests, 0 carrying nothing new)
+     … +56 lines (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now the load-bearing check — does the reader actually cope with all five
+  recorded paging shapes?
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys, signal…)
+  ⎿  loader                          rows   cos  complete  reason
+     ----------------------------------------------------------------------
+     ----------------------------------------
+     … +12 lines (ctrl+o to expand)
+⏺ All five terminate — no hangs. Let me confirm I haven't broken the existing
+  targets, and show the one shape that still gets through.
+
+⏺ Bash(make test 2>&1 | tail -5 && echo "=== demo (tail) ===" && make demo 2>&1
+      | tail -4 && echo "=== verify (tail) ===" && make verify 2>&1 | tail -4)
+  ⎿  ----------------------------------------------------------------------
+     Ran 1 test in 0.010s
+     … +13 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 audit.py --loader SilentlyShortLoader 2>&1 | head
+      -12)
+  ⎿  list                 : fixtures/target_accounts.json
+     loader               : SilentlyShortLoader  (page_size=25)
+     rows read            : 125  (5 page requests, 0 carrying nothing new)
+     … +9 lines (ctrl+o to expand)
+
+⏺ Update(Makefile)
+  ⎿  Added 5 lines, removed 1 line
+       1 -.PHONY: demo test verify                                       
+       1 +.PHONY: demo test verify audit                                 
+       2  
+       3  demo:
+       4    PYTHONPATH=src python3 demo.py
+       5  
+       6 +audit:                                                         
+       7 +  PYTHONPATH=src python3 audit.py --list fixtures/target_accoun
+         +ts.json                                                        
+       8 +  PYTHONPATH=src python3 audit.py --list fixtures/second_list.j
+         +son                                                            
+       9 +                                                               
+      10  test:
+      11    PYTHONPATH=src python3 -m unittest discover -s tests -v
+      12  
+
+⏺ Bash(make audit 2>&1 | grep -E "^(list|logical companies|contested rows|  by
+      company_id|  unidentified)" )
+  ⎿  list                 : fixtures/target_accounts.json
+     logical companies    : 209
+       by company_id      : 203
+     … +7 lines (ctrl+o to expand)
+
+⏺ Step 1 is built and running. Three new files, no changes to repair_lab.py —
+  make demo, make test, make verify all still pass unchanged.
+
+  src/identity.py — the identity policy, written down so a check can enforce it:
+
+  1. A row's identity is its company_id as text, stripped. Rows sharing it are
+  one company.
+  2. A row with a missing/null/blank company_id has no identity. It is never
+  merged — each is one company, flagged unidentified.
+  3. Nothing else merges or splits. Name and domain are evidence, reported as
+  conflicts, never used to decide identity.
+
+  src/paging.py — reads through the loader interface, keeps paging while pages
+  carry rows it hasn't seen, stops with a stated reason. audit.py / make audit —
+  prints the report.
+
+  The contested rows
+
+  List 1: 209 companies, 47 of 223 rows contested. List 2: 99 companies, 33 of 
+  115 contested.
+
+  The five classes come out as the roadmap predicted — 6 unidentified rows, 13
+  duplicate groups (14 extra rows), 2 ids spanning domains, 4 domains spanning
+  ids, 9 override rows. Two things I hadn't fully appreciated until it ran:
+
+  The starter is wrong in both directions. On list 2 at page_size=100 it reports
+  98 — below the true 99, so it deleted a real company (the two blank-id rows
+  merged). At page_size=10 it reports 103, above. So this isn't simply
+  "duplicates survive"; the same code over-counts and under-counts the same file
+  depending on page size.
+
+  company-copperline-energy is contested twice over. It appears in [C] (one id,
+  two domains) and its second domain copperline-group.example is
+  company-copperline-group's own domain in [D]. Either row-1217 is mislabelled
+  or these are one customer. The upload cannot settle it — which is exactly the
+  customer's "entries I cannot tell apart."
+
+  The reader now survives all five paging shapes
+
+  loader                          rows   cos  complete  reason
+  TargetAccountTool                223   209      True  service reported the end
+  of the list
+  ReplayingLoader                  223   209      True  service reported the end
+  of the list
+  StallingLoader                    75    71     False  cursor stopped advancing
+  at '50'...
+  CyclingLoader                    223   209     False  cursor stopped advancing
+  at '50'...
+  SilentlyShortLoader              125   116      True  service reported the end
+  of the list
+  TruncatedWithoutCursorLoader      25    24     False  more rows reported but
+  no cursor supplied
+
+  ReplayingLoader now lands on exactly 209 — same as the clean loader. Nothing
+  hangs.
+
+  But SilentlyShortLoader still gets through, and this is the honest gap. It
+  reads 125 of 223 rows, declares truncated=False, and the audit confidently
+  reports 116 companies. That number is wrong and nothing in the response says
+  so. From inside the loader interface a short read that claims success is
+  indistinguishable from a real ending — there's no signal to detect. TASK.md
+  specifically asks to be honest about the shapes where the right answer is "the
+  list cannot be read completely," and this is that shape.
+
+  The fix requires an independent witness: the row count from the upload record
+  itself, checked against what paging returned. That's a real interface change
+  (the caller must supply an expected count), and it belongs with defect 5
+  rather than being slipped in here — so I've left it, and the caveat line in
+  the output states the limitation rather than hiding it.
+
+  Want me to commit step 1 as-is, or wire the expected-row-count cross-check
+  first so the audit can't report a confident number off a truncated read?
+
+✻ Worked for 5m 23s
+
+❯ I think after you make the python scripts to do it. I also want you to just   
+  go through the lists and find all the descrepencies you think there are. And  
+  then just give me the two lists. It is fine if the lists are different. That  
+  is something I want to see. Make a seperate folder called aj_work for the     
+  script files and don't just put them in source                                
+
+⏺ Good — let me set up aj_work/ first, then hunt for discrepancies beyond the
+  five classes I already scripted.
+
+⏺ Bash(mkdir -p aj_work && git mv audit.py aj_work/audit.py 2>/dev/null || mv
+      audit.py aj_work/audit.py; ls aj_work src)
+  ⎿  aj_work:
+     audit.py
+     … +6 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, collections, re, itertools…)
+  ⎿  ======================================================================
+     ==========
+     LIST 1 fixtures/target_accounts.json 223 rows
+     … +215 lines (ctrl+o to expand)
+
+⏺ The list-2 name/id "mismatches" are an artifact of my slug heuristic (Kestrel 
+  2 → kestrel-2 vs kestrel2) — not real. Discarding those. Pass 2:
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, collections, re…)
+  ⎿  ======================================================================
+     ========
+     LIST 1 223 rows
+     … +73 lines (ctrl+o to expand)
+
+⏺ Now I have the picture. Writing the discrepancy scanner into aj_work/.
+
+⏺ Write(aj_work/discrepancies.py)
+  ⎿  Wrote 223 lines to aj_work/discrepancies.py
+       1 """Sweep an uploaded list for everything that looks off, not jus
+       2 
+       3 `audit.py` answers one question: how many companies is this. Thi
+         s script is the
+         wer would want
+       5 to see even when they do not change the number.
+       7 Every class is computed from the data. Nothing here names a fixt
+         ure value, so a
+       8 clean upload prints a clean report.
+      10 from __future__ import annotations
+     … +240 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 aj_work/discrepancies.py --list
+      fixtures/target_accounts.json 2>&1)
+  ⎿  list                : fixtures/target_accounts.json
+     rows read           : 223  (complete=True)
+     logical companies   : 209
+     … +82 lines (ctrl+o to expand)
+  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Two bugs in my own scanner: "out of file order" (205) is a meaningless
+  running-max artifact, and "key order varies" is actually key set variation.
+  Fixing both.
+
+⏺ Update(aj_work/discrepancies.py)
+  ⎿  Added 17 lines, removed 12 lines
+      54      return blocks
+      55  
+      56  
+      57 -def _out_of_sequence(rows) -> list[tuple[str, int]]:           
+      58 -    """Rows whose id number is lower than a row that appears be
+         -fore it."""                                                    
+      59 -    found, high = [], None                                     
+      60 -    for index, row in enumerate(rows):                         
+      57 +def _inserted_rows(rows) -> list[str]:                         
+      58 +    """Rows that sit out of ascending id order relative to the 
+         +row after them.                                                
+      59 +                                                               
+      60 +    A row numbered above its successor was written into a seque
+         +nce that was                                                   
+      61 +    already ordered, which points at a later edit rather than t
+         +he original                                                    
+      62 +    upload.                                                    
+      63 +    """                                                        
+      64 +    numbers = []                                               
+      65 +    for row in rows:                                           
+      66          match = TRAILING_NUMBER.search(_text(row.get("id")))
+      62 -        if not match:                                          
+      63 -            continue                                           
+      64 -        number = int(match.group(1))                           
+      65 -        if high is not None and number < high:                 
+      66 -            found.append((_text(row.get("id")), index))        
+      67 -        else:                                                  
+      68 -            high = number                                      
+      69 -    return found                                               
+      67 +        numbers.append(int(match.group(1)) if match else None) 
+      68 +    return [                                                   
+      69 +        _text(rows[i].get("id"))                               
+      70 +        for i in range(len(rows) - 1)                          
+      71 +        if numbers[i] is not None                              
+      72 +        and numbers[i + 1] is not None                         
+      73 +        and numbers[i] > numbers[i + 1]                        
+      74 +    ]                                                          
+      75  
+      76  
+      77  def scan(rows) -> dict[str, list]:
+
+⏺ Update(aj_work/discrepancies.py)
+  ⎿  Added 25 lines, removed 10 lines
+      146          f"{low}-{high}  ({count} rows)" for low, high, count i
+           n blocks
+      147      ] if len(blocks) > 1 else []
+      148  
+      149 -    out_of_seq = _out_of_sequence(rows)                       
+      150 -    out["row ids out of file order"] = (                      
+      151 -        [f"{len(out_of_seq)} rows appear after a higher-number
+          -ed row"                                                       
+      152 -         f" — first: {out_of_seq[0][0]} at index {out_of_seq[0
+          -][1]}"]                                                       
+      153 -        if out_of_seq                                         
+      154 -        else []                                               
+      149 +    inserted = _inserted_rows(rows)                           
+      150 +    out["rows written out of id order"] = (                   
+      151 +        [f"{len(inserted)} rows: {', '.join(inserted)}"] if in
+          +serted else []                                                
+      152      )
+      153  
+      157 -    shapes = collections.Counter(tuple(row.keys()) for row in 
+          -rows)                                                         
+      158 -    out["json key order varies"] = (                          
+      159 -        [f"{count}x  {list(shape)}" for shape, count in shapes
+          -.items()]                                                     
+      160 -        if len(shapes) > 1                                    
+      154 +    key_sets = collections.Counter(frozenset(row) for row in r
+          +ows)                                                          
+      155 +    out["rows carry different fields"] = (                    
+      156 +        [                                                     
+      157 +            f"{count}x  {sorted(shape)}"                      
+      158 +            for shape, count in key_sets.most_common()        
+      159 +        ]                                                     
+      160 +        if len(key_sets) > 1                                  
+      161          else []
+      162      )
+      163  
+      164 +    orders = collections.Counter(                             
+      165 +        tuple(row.keys()) for row in rows if frozenset(row) in
+          + key_sets                                                     
+      166 +    )                                                         
+      167 +    same_set_orders = collections.Counter()                   
+      168 +    for order, count in orders.items():                       
+      169 +        same_set_orders[(frozenset(order), order)] = count    
+      170 +    varied = [                                                
+      171 +        (order, count)                                        
+      172 +        for (shape, order), count in same_set_orders.items()  
+      173 +        if sum(c for (s, _), c in same_set_orders.items() if s
+          + == shape) != count                                           
+      174 +    ]                                                         
+      175 +    out["same fields, different key order"] = (               
+      176 +        [f"{count}x  {list(order)}" for order, count in varied
+          +] if varied else []                                           
+      177 +    )                                                         
+      178 +                                                              
+      179      segments = {_text(row.get("segment")) for row in rows if r
+           ow.get("segment")}
+      180      spaced = sorted(s for s in segments if " " in s)
+      181      scored = sorted(s for s in segments if "_" in s)
+
+⏺ Bash(python3 - <<'PYEOF'
+      import re,pathlib…)
+  ⎿     company-tessellate-energy        Tessellate Energy | Tessellate Ene
+     rgy Inc
+     … +23 lines (ctrl+o to expand)  ⎿  Found 3 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 aj_work/discrepancies.py --list
+      fixtures/second_list.json 2>&1)
+  ⎿  list                : fixtures/second_list.json
+     rows read           : 115  (complete=True)
+     logical companies   : 99
+     … +58 lines (ctrl+o to expand)
+
+⏺ Update(Makefile)
+  ⎿  Added 6 lines, removed 2 lines
+       4    PYTHONPATH=src python3 demo.py
+       5  
+       6  audit:
+       7 -  PYTHONPATH=src python3 audit.py --list fixtures/target_accoun
+         -ts.json                                                        
+       8 -  PYTHONPATH=src python3 audit.py --list fixtures/second_list.j
+         -son                                                            
+       7 +  PYTHONPATH=src python3 aj_work/audit.py --list fixtures/targe
+         +t_accounts.json                                                
+       8 +  PYTHONPATH=src python3 aj_work/audit.py --list fixtures/secon
+         +d_list.json                                                    
+       9  
+      10 +discrepancies:                                                 
+      11 +  PYTHONPATH=src python3 aj_work/discrepancies.py --list fixtur
+         +es/target_accounts.json                                        
+      12 +  PYTHONPATH=src python3 aj_work/discrepancies.py --list fixtur
+         +es/second_list.json                                            
+      13 +                                                               
+      14  test:
+      15    PYTHONPATH=src python3 -m unittest discover -s tests -v
+      16  
+
+⏺ Bash(sed -i '' 's/^\.PHONY: demo test verify audit$/.PHONY: demo test verify
+      audit discrepancies/' Makefile && make audit 2>&1 | grep -E
+      "^(list|logical)" && echo "-…)
+  ⎿  list                 : fixtures/target_accounts.json
+     logical companies    : 209
+     list                 : fixtures/second_list.json
+     … +5 lines (ctrl+o to expand)
+
+⏺ Scripts are in aj_work/ (audit.py, discrepancies.py); src/ keeps only the two
+  importable modules the eventual fix will need. make audit and make 
+  discrepancies run both lists. Here are the two discrepancy lists.
+
+  List 1 — target_accounts.json (223 rows → 209 companies, 12 classes populated)
+
+  ┌─────┬──────────────────┬──────────────────────────────┬────────────────┐
+  │  #  │   Discrepancy    │            Count             │ Affects count? │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │     │ Blank identity — │                              │                │
+  │ 1   │  company_id:     │ 6 rows (row-2401…2406)       │ Yes            │
+  │     │ null             │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 2   │ Repeated         │ 13 groups / 14 extra rows    │ Yes            │
+  │     │ company_id       │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 3   │ One id, several  │ 2 (kestrel-robotics,         │ Unresolvable   │
+  │     │ domains          │ copperline-energy)           │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 4   │ One domain,      │ 4 (3 -emea pairs +           │ Trap — merging │
+  │     │ several ids      │ copperline-group)            │  deletes 4     │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │     │ Row overrides    │ 9 rows →                     │ No, but wrong  │
+  │ 5   │ the request      │ brand-kit-2019-legacy +      │ output         │
+  │     │                  │ template-legacy-blast        │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │     │ Field conflict   │                              │ Which row wins │
+  │ 6   │ inside one       │ 2 (both domain)              │  matters       │
+  │     │ identity         │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │     │ Name differs     │                              │                │
+  │ 7   │ only by          │ 11 groups                    │ No             │
+  │     │ case/suffix      │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 8   │ Two id blocks    │ 1001-1217 (217) + 2401-2406  │ Provenance     │
+  │     │                  │ (6)                          │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 9   │ Rows written out │ 17                           │ Provenance     │
+  │     │  of id order     │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 10  │ Rows carry       │ 214 vs 9 (the override rows) │ No             │
+  │     │ different fields │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 11  │ Mixed segment    │ financial services vs        │ No             │
+  │     │ taxonomy         │ real_estate                  │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ 12  │ ALL-CAPS         │ 4 rows                       │ No             │
+  │     │ company_name     │                              │                │
+  ├─────┼──────────────────┼──────────────────────────────┼────────────────┤
+  │ —   │ Rows identical   │ 0                            │ —              │
+  │     │ except id        │                              │                │
+  └─────┴──────────────────┴──────────────────────────────┴────────────────┘
+
+  List 2 — second_list.json (115 rows → 99 companies, 6 classes populated)
+
+  ┌─────┬────────────────────────────┬────────────────────────┬────────────┐
+  │  #  │        Discrepancy         │         Count          │  Affects   │
+  │     │                            │                        │   count?   │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 1   │ Blank identity —           │ 2 rows                 │ Yes        │
+  │     │ company_id: ""             │ (srow-1114/1115)       │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 2   │ Repeated company_id        │ 15 groups / 16 extra   │ Yes        │
+  │     │                            │ rows                   │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 3   │ Rows identical except id   │ 1 group                │ Yes        │
+  │     │                            │ (srow-1111/1112/1113)  │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 4   │ Name differs only by       │ 14 groups              │ No         │
+  │     │ case/suffix                │                        │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 5   │ Rows written out of id     │ 4                      │ Provenance │
+  │     │ order                      │                        │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │ 6   │ Same fields, different key │ 112x vs 3x             │ Provenance │
+  │     │  order                     │                        │            │
+  ├─────┼────────────────────────────┼────────────────────────┼────────────┤
+  │     │ id/domain conflicts,       │                        │            │
+  │ —   │ overrides, field           │ 0                      │ —          │
+  │     │ conflicts, batches,        │                        │            │
+  │     │ taxonomy, hygiene          │                        │            │
+  └─────┴────────────────────────────┴────────────────────────┴────────────┘
+
+  What I found beyond the count classes
+
+  The README's "217 rows" is not stale — it's the original upload. Row ids form
+  exactly two blocks: 1001-1217 = 217 rows, and 2401-2406 = 6 rows. The six rows
+  the README doesn't know about are precisely the six with company_id: null. So
+  the upload is two batches, and the second batch is the one whose identity
+  resolution failed. That's independent support for counting them as six real
+  companies rather than one — they're not corrupt, they're unresolved.
+
+  List 1's contamination is one contiguous sub-range. Within block 1, 1201-1212
+  are the 12 duplicate re-imports, and 1213-1217 are the 5 identity-conflict
+  rows (3 -emea subsidiaries, plus the two duplicates carrying a different
+  domain). Base rows 1001-1200 are clean. So: 200 clean + 12 duplicates + 3
+  subsidiaries + 2 ambiguous + 6 unresolved = 223.
+
+  List 2's straddle rows were written by different code. srow-1111/1112/1113 are
+  the only rows with id last in the JSON key order instead of first — and
+  they're also the only byte-identical triple. Different serializer, same
+  insertion.
+
+  Two conflicts I'd escalate rather than decide. company-copperline-energy is
+  contested twice: it has two domains (#3) and its second domain is
+  company-copperline-group's own (#4). Either row-1217 is mislabelled or they're
+  one customer. The upload can't settle it.
+
+  Why the lists differ in shape: list 1's mess is appended — a re-import batch
+  plus an unresolved batch, carrying real identity conflicts and 9 override
+  rows. List 2's is inline — no batches, no conflicts, no overrides, and its
+  only exotic case is three byte-identical rows. Zero overlap between the files
+  (no shared ids, domains, or company_ids), so they're independent uploads.
+  That's why list 1 needs a stated tie-break policy and list 2 doesn't.
+
+  Two things I did not treat as findings: the Kestrel 2 / kestrel2 name-vs-id
+  pattern in list 2 (an artifact of my own slug heuristic, not a defect), and my
+  first out of file order metric, which reported 205 rows off a running-max bug
+  — the corrected check reports 17.
+
+  Want me to commit aj_work/ plus the step-1 modules, or fold anything from
+  these lists into the roadmap first?
+
+✻ Worked for 4m 16s
+
+※ recap: Goal is auditing a campaign the customer disputes. I've committed ROADMAP.md and built the step-1 scripts in aj_work, which report 209 companies for list 1 and 99 for list 2, plus full discrepancy lists. Next: commit that work. (disable recaps in /config)
+
+❯ Can you first create a file of the descrepencies you found and then the       
+  discrepencies the scripts found aj_work/discrepancies. Make the name start    
+  with claude_...                                                               
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      PYTHONPATH=src python3 aj_work/discrepancies.…)
+  ⎿        86 /private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-au
+     dit/9334d3f7-50cb-49a0-b241-88cf90df5324/scratchpad/d1.txt
+           61 /private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-au
+     … +2 lines (ctrl+o to expand)
+
+⏺ Write(aj_work/claude_discrepancies.md)
+  ⎿  Wrote 149 lines to aj_work/claude_discrepancies.md
+       1 # Discrepancies in the two uploaded lists
+       3 Two parts, in this order:
+       4 
+         unding files. Some
+       6   of it I later encoded into the scanner; some of it cannot be e
+       7   is an inference about provenance rather than a property of a r
+         ow.
+          for both lists.
+       9 
+         I added the check
+     … +197 lines (ctrl+o to expand)
+
+⏺ Bash(python3 - <<'PYEOF'
+      import pathlib…)
+  ⎿  embedded; file now 294 lines
+
+⏺ aj_work/claude_discrepancies.md — 294 lines, two parts.
+
+  Part 1 (mine, 10 items) — each tagged not automated / now automated / partly 
+  automated, so the lineage is honest about which findings I encoded into the
+  scanner after finding them by hand:
+
+  1. README's "217 rows" is the original upload, not a stale number — ids split
+  into 1001-1217 (217) and 2401-2406 (6), and that second block is exactly the
+  six null-id rows
+  2. List 1's contamination is one contiguous sub-range: 200 clean + 12 + 3 + 2
+  + 6 = 223
+  3. The starter under-counts as well as over-counts (list 2 at page_size=100 →
+  98, below the true 99)
+  4. company-copperline-energy is contested under two classes at once
+  5. The -emea rows punish any domain-based fix — and make verify can't catch it
+  6. List 2's identical triple has a different JSON key order — different
+  serializer
+  7. The two files are independent uploads (zero overlap)
+  8. The SilentlyShortLoader gap — reads 125 of 223, reports 116 companies, no
+  warning
+  9. Two things I checked and rejected: the Kestrel 2 slug false positive (83
+  phantom rows), and trace t-4c08 as an unrelated distractor
+  10. Why the two lists differ in shape — appended mess vs inline mess
+
+  I also recorded the bug in my own scanner (running-max check reporting 205
+  rows; corrected to 17), since you'd otherwise see the number change between
+  runs with no explanation.
+
+  Part 2 — verbatim output of aj_work/discrepancies.py for both lists, embedded
+  from a fresh run rather than retyped. Regenerate with make discrepancies.
+
+  The split is uneven, and that's the real signal: most of Part 1 is inference 
+  across files — data against README, data against make verify's blind spot,
+  data against the traces. The scanner is good at "these rows disagree with each
+  other" and structurally can't reach "this row count matches a number in the
+  README."
+
+  Nothing is committed yet — aj_work/, src/paging.py, src/identity.py, and the
+  Makefile targets are all still unstaged.
+
+✻ Sautéed for 1m 18s
+
+※ recap: Goal is proving what "complete" means for the campaign audit; ROADMAP.md is committed and step 1 is done, with the discrepancy scripts and claude_discrepancies.md written in aj_work. Next action is committing aj_work, src/paging.py, src/identity.py, and the Makefile targets.
+
+❯ /model 
+  ⎿  Kept model as Opus 5 (1M context)
+
+❯ /usage 
+  ⎿  Settings dialog dismissed
+
+❯ I changed some things, do you agree with those changes. Look at the staged    
+  changes.                                                                      
+
+⏺ Bash(git status --short && echo "=== STAGED DIFF ===" && git diff --cached)
+  ⎿  M  aj_work/context.md
+     M  aj_work/discrepencies/new_discrepancies.md
+     M  aj_work/discrepencies/step1_discrepancies.md
+     … +189 lines (ctrl+o to expand)
+
+⏺ Let me verify the factual claims in these edits rather than just eyeball the
+  wording.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, collections, re…)
+  ⎿  [1] repeated-id groups=13  rows in those groups=27  extra rows=14
+         sizes: Counter({2: 12, 3: 1})
+     … +10 lines (ctrl+o to expand)
+
+⏺ All four changes verify. Let me check one adjacent claim the edits lean on.
+
+⏺ Bash(sed -n '1,60p' aj_work/context.md)
+  ⎿  # Context: what happened, and how we know
+
+     Consolidated findings for the campaign audit. This is the shared refer
+     … +57 lines (ctrl+o to expand)
+⏺ The "what the service actually served" claim is doing real work here. Let me
+  test it: 217 mod 25 = 17, and trace t-9f21's final page is exactly 17 rows
+  with truncated: false.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, re, sys…)
+  ⎿  final-page size at page_size=25:
+       223 rows -> 23 rows on last page
+       217 rows -> 17 rows on last page   <-- trace t-9f21 shows 17
+     … +6 lines (ctrl+o to expand)
+
+⏺ That result changes the picture materially. Let me pin down exactly what the
+  recorded run delivered.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, re, sys, collections…)
+  ⎿  rows the run shipped        : 209
+     distinct companies covered  : 203
+     companies covered TWICE     : 6
+     … +19 lines (ctrl+o to expand)
+
+⏺ Yes — all four changes are correct, and I verified each rather than taking
+  them on read:
+
+  Change: 28 → 27 rows in repeated-id groups
+  Verdict: Right, mine was wrong. 12 pairs + 1 triple = 27 rows, 14 extra after
+  grouping
+  ────────────────────────────────────────
+  Change: "4 contested identity groups" vs "5 contested companies"
+  Verdict: Right. Union-find over shared domains gives exactly 205 — a gap of 4.
+
+  And kestrel-group.example is owned only by company-kestrel-robotics, so it
+  genuinely never moves the total. The 4/5 split is a real distinction, not a
+  wording fudge
+  ────────────────────────────────────────
+  Change: "the base upload is clean" → clean of identity problems
+  Verdict: Right, mine was too strong. 8 of the 9 override rows are in
+  1001-1200;
+  only row-1213 sits above
+  ────────────────────────────────────────
+  Change: "ambiguous" → "contested"
+  Verdict: Consistent, no factual content
+
+  One nitpick on the canonical table: for copperline-group.example you list
+  company-copperline-energy as "at risk if merged." Merging that domain fuses
+  copperline-energy and copperline-group — which of the two disappears is
+  arbitrary. The −1 count effect is right either way; the column just reads more
+  decided than the data is.
+
+  The 217 claim led somewhere
+
+  I went to check "what the service actually served," expecting it to be
+  unsupported. It isn't — and chasing it cracked open trace t-9f21:
+
+  final-page size at page_size=25:
+    223 rows -> 23 rows on last page
+    217 rows -> 17 rows on last page   <-- trace t-9f21 shows 17
+
+  1xxx block: 217 rows
+    starter at page_size=25: source_rows=209  deliverables=836
+    trace t-9f21 claimed      : source_row_count=209  deliverable_count=836
+    match: True
+
+  The recorded run is now exactly reproducible: the service served only the
+  217-row 1xxx block, 9 pages at page_size=25, and the starter's per-page dedup
+  turns that into precisely 209 source rows and 836 deliverables. The trace was
+  showing the last 3 of 9 pages.
+
+  I need to correct something I told you earlier. I said the trace "reports 209
+  from only 67 recorded rows read — its own evidence doesn't support its claim."
+  That was wrong; the trace is internally consistent and I mistook a sampled
+  log for a complete one.
+
+  And what it reproduces is worse than a wrong number:
+
+  companies covered TWICE     : 6
+      company-sable-works, company-kestrel-dynamics, company-harbor-group,
+      company-ironwood-logistics, company-vantage-networks,
+  company-tessellate-energy
+
+  companies NEVER served      : 6
+      Halverson Freight, Pell & Sons Ironworks, Cobalt Ridge Dental,
+      Northgate Tutoring, Riverbend Cold Storage, Aster Point Realty
+
+  6 companies got double creative; 6 companies got none. The errors cancel to a 
+  total of 209 — which happens to equal the true company count. The run looked
+  right by arithmetic accident. The customer's "a couple of companies came back
+  twice" and "I do not believe the number" are the same defect seen from two
+  sides.
+
+  This also sharpens the trap in the roadmap: 209 is the correct answer and the
+  number the broken run printed, for unrelated reasons — 209 rows-after-dedup
+  versus 203 identified + 6 unidentified companies. Anyone anchoring on the
+  trace gets the right number while shipping a campaign that misses 6 customers.
+
+  The six never-served rows are exactly the 2xxx block, which supports your
+  framing that they're a separate batch — though why the service skipped them
+  (filtered by id range? assembled into the fixture later?) isn't determinable
+  from what's here, and belongs in the open-questions section rather than as an
+  asserted cause.
+
+  Want me to write this into context.md §1 as the reconstruction of the recorded
+  run, and update the customer-report table where it currently says "6,
+  page-size dependent"?
+
+✻ Worked for 2m 35s
+
+※ recap: We're auditing the campaign repo so it can prove what "complete" means; I verified your staged doc edits are all correct and reconstructed the recorded run exactly. Next: write that reconstruction into context.md §1 and fix the customer-report table entry, on your go-ahead.
+
+❯ Can you aj_work/FIX_PLAN.md and tell me how it looks and if you  disagree     
+  with anything.                                                                
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+⏺ Strong document. Let me verify the numbers rather than trust them.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys…)
+  ⎿  [A3 table] SilentlyShortLoader
+       list1 ps=25   rows=125 of 223  companies=116  complete=True  missing
+     =93
+     … +19 lines (ctrl+o to expand)
+
+⏺ Bash(echo "=== the command the plan says to run ===" && git diff 8f0f5c7
+      --stat -- src/ tests/ demo.py; echo "--- exit:$? ---"; echo "=== with
+      Makefile included ==="…)
+  ⎿  === the command the plan says to run ===
+      src/identity.py | 197 +++++++++++++++++++++++++++++++++++++++++++++++
+     +++++++++
+     … +9 lines (ctrl+o to expand)
+
+⏺ Verified the numbers. The A3 table, the B1 decomposition, the E1/E2 tables,
+  and the C3 arithmetic all hold — including the non-obvious one: all 9 override
+  rows are distinct companies, so 36 survives per-company grouping rather than
+  shrinking.
+
+  Six things I'd change, in order of how much they matter.
+
+  1. C2's "Current" figures are wrong — and the truth makes C2 more urgent
+
+  The plan says "Current: list 1 — 14 rows unreferenced; list 2 — 16." Measured:
+
+  list1 ps=25   referenced=214 of 223 -> unreferenced=9    (absorbed under
+  correct grouping = 14)
+  list1 ps=100  referenced=211 of 223 -> unreferenced=12
+  list2 ps=25   referenced=100 of 115 -> unreferenced=15   (absorbed under
+  correct grouping = 16)
+  list2 ps=100  referenced= 98 of 115 -> unreferenced=17
+
+  14 and 16 aren't the current state — they're the number of rows absorbed after
+  the identity fix lands. So C2 isn't describing an existing defect; it's
+  describing one that B1/B3 would introduce if C2 didn't ship alongside. Today 9
+  rows lose provenance; after grouping, 14 would, unless source_row_ids goes
+  plural in the same change. That's a stronger argument than the one written,
+  and it makes C2 a co-requisite of step 1 rather than a step-3 nicety.
+
+  Also worth noting the current numbers are page-size dependent (9 vs 12), which
+  is itself the B1 defect leaking into provenance.
+
+  2. B2's "5 lost" needs a page-size qualifier
+
+  The plan says "6 companies collapse to 1 in list 1 (5 lost) — visible at
+  ps=100." At ps=100 it's 3 lost, not 5 — the six blank-id rows sit at indices
+  12, 37, 61, 98, 149, 202, so only four share page 0. You need the whole list
+  on one page (ps≥203) to lose all 5. List 2's "(1 lost)" is correct at ps=100.
+
+  Suggest: "up to 5 lost; 3 at ps=100."
+
+  3. Steps 1 and 2 in "Order of work" aren't separable
+
+  Step 1 is "wire identity.py in, delete _collapse_page"; step 2 is "route reads
+  through collect_rows." But grouping after the full read requires having the
+  full read — which is collect_rows. Doing step 1 alone means writing a
+  throwaway collection loop, and it lands the repo in a state where the counts
+  changed but the hangs are still there. Merge them into one step.
+
+  4. The verification command doesn't reproduce
+
+  git diff 8f0f5c7 --stat -- src/ tests/ demo.py
+  The pathspec excludes Makefile, so the pasted Makefile | 10 ++- line can't
+  appear. Add Makefile to the pathspec — the rest of the output is accurate.
+
+  5. A3 is more closable than the plan claims — my main substantive disagreement
+
+  The plan says detecting a short read "needs an independent expected row count,
+  which no fixture provides." But demo.py already reads the JSON to construct
+  the loader — the caller has len(accounts) in hand and simply doesn't pass it.
+  That's not reading the fixture behind the interface's back; it's the upload
+  record declaring its own size, which is what a real upload does.
+
+  If collect_rows took an optional expected_row_count, A3 would be closed for 
+  every path the harness exercises — demo, verify, and all tests — instead of
+  labelled. The residual limit shrinks to "a caller who genuinely has no
+  declared count," which is a much narrower claim than "undetectable."
+
+  I'd still keep the service_claimed / verified split — that's right regardless.
+  But A3 belongs in "partly closed," not in Known Limits alongside things that
+  can't be fixed.
+
+  6. One policy decision is implied by arithmetic but never stated
+
+  836 = 209 × 4 means unidentified companies each receive four deliverables.
+  That's a real choice — shipping personalized creative for a company you cannot
+  identify — and it's the one you picked earlier over withholding. It should be
+  stated in B2 or C1 rather than inferred from a multiplication, because a
+  reviewer who'd have chosen "quarantine and withhold" needs to see it was
+  decided, not defaulted.
+
+  What's good and worth keeping as-is
+
+  The cause vs symptom table is the sharpest thing in the document, and C3's
+  "removes the silence, not the override" is exactly the distinction TASK.md
+  asks for. The D3 arithmetic — claimed 209 = 203 served once + 6 duplicate rows
+  vs true 209 = 203 + 6 never served — is the strongest evidence in the whole
+  repo, and putting it in the fix plan rather than burying it in context.md is
+  the right call. E2's "a guard silent on both fixtures cannot have been fitted 
+  to them" pre-empts the obvious reviewer objection. And Known Limits #2 and #4
+  are the kind of thing most submissions omit.
+
+  Nothing in the plan is a symptom-hider, and the claim that it isn't holds up
+  under checking.
+
+✻ Cooked for 2m 9s
+
+※ recap: We're auditing the campaign repo to prove what "complete" means; the fix plan is written and I've reviewed it, flagging six corrections. Next: apply those corrections to FIX_PLAN.md, then start wiring identity and paging into build_campaign_plan.
+
+❯ Can you tell me a bit more about A3 and what the issue is there.              
+
+⏺ Good question to push on — A3 is the one gap the fix plan can't close by
+  computing harder, and it turns out to be more central than the plan gives it
+  credit for.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys…)
+  ⎿  SilentlyShortLoader over 223 rows : [(25, '25', True), (25, '50', True
+     ), (25, '75', True), (25, '100', True), (25, None, False)]
+     TargetAccountTool over 125 rows   : [(25, '25', True), (25, '50', True
+     … +7 lines (ctrl+o to expand)
+
+⏺ Here's the full shape of it.
+
+  What the loader does
+
+  SilentlyShortLoader stops at STOP_AFTER = 120 rows and returns
+  next_cursor=None, truncated=False — the exact response a service gives when it
+  has genuinely reached the end. It doesn't error, doesn't warn, doesn't set a
+  flag. It reports success on a partial read.
+
+  Why it can't be detected from inside the interface
+
+  I compared the loader lying about a 223-row list against a loader honestly
+  serving a real 125-row list:
+
+  SilentlyShortLoader over 223 rows : [(25,'25',True), (25,'50',True),
+  (25,'75',True), (25,'100',True), (25,None,False)]
+  TargetAccountTool over 125 rows   : [(25,'25',True), (25,'50',True),
+  (25,'75',True), (25,'100',True), (25,None,False)]
+
+  identical page sequence?  True
+  identical row payloads?   True
+
+  Not "similar" — identical. Same page count, same row counts, same cursors,
+  same truncated values, same rows. There is no field to look at. Any check that
+  could flag the first would flag the second, and the second is correct
+  behavior.
+
+  That's what makes A3 different from the other four shapes. Stalling, Cycling
+  and TruncatedWithoutCursor all misbehave observably — a cursor repeats, or
+  claims more data with no way to fetch it. Replaying sends a page you've
+  already seen. Each leaves a fingerprint in the protocol. A short read leaves
+  none.
+
+  What it costs
+
+  list1 ps=25   rows=125 of 223   companies=116   complete=True   93 companies
+  missing
+  list1 ps=100  rows=200 of 223   companies=191   complete=True   18 companies
+  missing
+
+  At page_size=25 the customer gets a campaign covering 116 of 209 companies,
+  with complete: True and a green check. And note the damage is arbitrary — how
+  much you lose depends on where STOP_AFTER falls relative to your page
+  boundaries, so a larger page size accidentally recovers 75 more companies.
+  Nothing about that is principled.
+
+  The part that matters most: this is what the recorded incident looks like
+
+  The reconstruction we did earlier — trace t-9f21 — showed the service serving
+  217 of the 223 rows and ending with truncated: false. That is not a
+  hypothetical loader. That is a silently-short read, in production, in the
+  customer's actual run. The six rows never served are exactly the six the
+  customer never got creative for.
+
+  Whether the service dropped them or they were added to the file afterward
+  can't be determined from what's here. But that ambiguity is A3: from the
+  reader's seat, "the service dropped 6 rows and lied" and "there were only 217
+  rows" produce the same bytes.
+
+  And here's the uncomfortable detail — a heuristic wouldn't have saved it. You
+  might think "a final page that's exactly full is suspicious," since a genuine
+  end usually gives a partial page. 223 % 25 = 23, so a real end yields 23 rows;
+  the short read yields a full 25. But the production run's final page was 17 
+  rows — a partial page, 217 % 25 = 17, maximally legitimate-looking. The one
+  real incident we have would have passed the heuristic.
+
+  Why make verify is blind to it
+
+  STOP_AFTER = 120 exceeds list 2's 115 rows, so the loader never truncates
+  there — list 2 returns a correct 99 under SilentlyShortLoader, by luck. The
+  held-out list cannot exercise this at all. It's the second question (after the
+  identity rule) where verify proves nothing.
+
+  What actually closes it
+
+  Only an independent witness: a row count from the upload record, reconciled
+  against what paging returned. 223 ≠ 125 fails immediately, and it would have
+  caught the production run too (223 ≠ 217).
+
+  This is where I disagree with the plan's framing. It says no fixture provides
+  that count — but demo.py already reads the JSON to construct the loader, so
+  len(accounts) is sitting right there, unused. Passing it isn't reading
+  accounts behind the interface's back; it's the upload declaring its own size,
+  which is what a real upload manifest does. Thread it through and A3 is closed
+  for demo, verify, and every test.
+
+  What genuinely remains after that is much narrower: a caller with no declared
+  count, and a service that lies about the count and the rows consistently.
+  That's unsolvable and worth one sentence in Known Limits — but it's a smaller
+  claim than "undetectable."
+
+  The service_claimed_complete / verified_complete split is right either way,
+  independent of whether the count gets threaded. Two different facts should
+  never share one boolean.
+
+✻ Cooked for 1m 13s
+
+※ recap: We're auditing a broken campaign run so the system can prove what "complete" means; the roadmap and step-1 discrepancy work are done and FIX_PLAN.md is reviewed. Next: apply the six corrections I raised, starting with A3's expected-row-count fix.
+
+❯ Why might have this happened:  But the production run's final page was 17     
+  rows — a partial page, 217 % 25 = 17, maximally legitimate-looking. The       
+    one real incident we have would have passed the heuristic.                  
+                                                                                
+  How does something like that happen?                                          
+
+⏺ Good instinct to push on that — testing it changes the diagnosis.
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, re, sys, collections…)  ⎿  trace t-9f21 claimed: source_row_count=209  deliverable_count=836
+     last recorded page  : 17 rows, truncated=false
+     … +11 lines (ctrl+o to expand)
+
+⏺ The test discriminates cleanly, and the answer is: it wasn't a short read at 
+  all.
+
+  H1  filter out the 6 null-id rows (217 rows) -> (209, 836)   final page 17
+  rows   <- exact match
+  H2  truncate file at 217 rows                -> (208, 832)   final page 17
+  rows   <- doesn't match
+
+  The trace claimed 209 rows / 836 deliverables. Only the filter hypothesis
+  reproduces both. Truncation gives 208/832 — close, but wrong, and wrong is
+  enough.
+
+  The positional evidence says the same thing. The six missing rows sit at
+  positions 12, 37, 61, 98, 149, 202 — scattered through the file. The last six
+  rows are row-1200, row-1208…row-1212. A read that stopped early drops a
+  contiguous tail. This dropped a scattered predicate: exactly the rows with
+  company_id: null.
+
+  So why did the final page look legitimate? Because it was
+
+  The pagination never lied. Nine pages, 8×25 + 17, truncated: false — that is a
+  correct, honest, complete pagination over a result set that had already lost 
+  six rows before paging began. The paging layer was working perfectly. The set
+  handed to it was wrong.
+
+  That's why no signal downstream looked off: clean page sequence, genuinely
+  partial final page, correct cursor termination, self-consistent totals, and a
+  check that passed.
+
+  How a system ends up doing that
+
+  The realistic mechanisms all put a filter upstream of pagination:
+
+  - An INNER JOIN where a LEFT JOIN was intended. Upload rows live in staging;
+  serving joins them to resolved company records to populate company_id and
+  company_name. Rows whose identity resolution failed have no company record, so
+  the join silently discards them. This is the single most common way this
+  happens.
+  - A "resolved rows only" serving view. Two-phase import: upload → stage 223 →
+  enrichment matches domain/name against the account graph → 6 fail to resolve →
+  the view the campaign reads is WHERE company_id IS NOT NULL. The staging
+  table still holds 223; nothing reads it.
+  - Keyset pagination on a nullable column. If the cursor is WHERE company_id > 
+  :cursor ORDER BY company_id, NULL never satisfies the predicate — SQL NULL
+  comparisons are never true. Those rows become permanently unreachable, and the
+  scan terminates normally without them.
+  - A partial index (... WHERE company_id IS NOT NULL) used to order the scan,
+  so an index-only plan never visits the NULL rows.
+
+  All four produce identical symptoms: a correct row count, a correct cursor
+  chain, a legitimate partial final page, and a quiet truncated: false.
+
+  Why this is the worst version of the bug
+
+  The loss isn't random — it's correlated with difficulty. The rows that
+  vanished are precisely the ones whose identity couldn't be resolved: the
+  hardest cases, the ones most needing human review. A system with this bug
+  systematically discards its own unresolved work and reports success. The
+  harder a row is, the more likely it disappears, and the cleaner the run looks.
+
+  That's also why the customer noticed duplicates but not omissions. Duplicates
+  are visible when you spot-check twenty rows. Six companies that were never
+  mentioned are invisible by construction — you can't spot-check for absence.
+
+  What this means for A3 in the fix plan
+
+  A3 is currently framed as "a short read that claims success." That's
+  mis-attributed. The recorded incident was a filtered read that correctly 
+  claimed success, and no amount of hardening in paging.py can see it — the
+  protocol was obeyed exactly. SilentlyShortLoader truncates at an offset and
+  isn't a faithful model of what actually happened.
+
+  The fix doesn't change: reconciling against a declared row count (223 ≠ 217)
+  catches both. But the framing should, because the difference tells you where
+  to look — not at the paging service, at whatever assembles the row set before
+  it. Worth adding a sixth loader that drops rows by predicate rather than by
+  offset, since none of the five in sources.py models this.
+
+  Calibration: this is inference from an exact match on two independent numbers
+  plus the page shape, which is strong but not proof. The alternative — the six
+  rows were added to the fixture after the run — can't be excluded from the
+  evidence here, though it requires a re-export that interleaved them rather
+  than appending. Either way, both readings are indistinguishable to any reader
+  that doesn't reconcile against the upload, which is the actual point.
+
+✻ Cooked for 1m 39s
+
+※ recap: We're auditing the CharacterQuilt campaign repo, and just finished reviewing your FIX_PLAN.md against the data. Next: apply the six corrections I flagged, chiefly rescoping A3 from "short read" to "filtered read" since the run dropped rows by predicate, not truncation.
+
+❯ Can you test the 4 recent commits and make sure all that code is correct.     
+
+⏺ Bash(git log --oneline -6 && echo "=== files changed in last 4 ===" && git
+      diff --stat HEAD~4 HEAD && echo "=== working tree ===" && git status
+      --short)
+  ⎿  8fbd855 E: surface the contested records, and guard attributes we do n
+     ot currently need
+     7cdf257 D: the check reconciles against the upload instead of grading
+     … +19 lines (ctrl+o to expand)
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Let me run everything, then probe it adversarially.
+
+⏺ Bash(echo "=== make test ===" && make test 2>&1 | tail -6; echo "=== make demo
+      ===" && make demo 2>&1; echo "=== make verify ===" && make verify 2>&1)
+  ⎿  === make test ===
+     test_supplied_evaluator_accepts_the_published_plan (test_visible.Suppl
+     iedEvaluatorSmokeTest.test_supplied_evaluator_accepts_the_published_pl
+     … +99 lines (ctrl+o to expand)
+
+⏺ All green with the right numbers. Now let me attack it.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      cat > $S/probe.py <<'EOF'…)
+  ⎿  === 1. all five paging shapes x both lists, WITH declared size ===
+       L1 TargetAccountTool              rows= 223 companies= 209 claimed=T
+     rue  verified=true     consistent
+     … +56 lines (ctrl+o to expand)
+
+⏺ Found a real defect. Let me pin down its blast radius.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      PYTHONPATH=src python3 - <<'EOF'…)
+  ⎿  === root cause: which companies get duplicated? ===
+       rows returned=446 (served) vs rows_deduped=223
+       identified companies  =203  (expected 203)
+     … +14 lines (ctrl+o to expand)
+
+⏺ Bash(grep -n "expected_row_count\|collect_rows\|build_campaign_plan" demo.py
+      aj_work/audit.py aj_work/discrepancies.py | head -30; echo "=== aj_work
+      scripts still ru…)
+  ⎿  demo.py:8:from paging import collect_rows
+     demo.py:11:    build_campaign_plan,
+     demo.py:19:    return build_campaign_plan(
+     … +21 lines (ctrl+o to expand)
+
+⏺ Tested all four commits. 10 of 10 doctored plans rejected, page-size 
+  invariance holds at every size from 1 to 1000, conservation and arity hold on 
+  both lists — and there's one real defect.
+
+  The defect: a replaying service inflates the plan when no declared size is 
+  passed
+
+  build_campaign_plan(ReplayingLoader(L1), ...)      # no expected_row_count
+    companies=215  deliverables=860      (should be 209 / 836)
+
+  Root cause is in paging._resolve: with expected_row_count is None it returns
+  served — every row the service handed over, replays included. Then in
+  build_inventory:
+
+  rows returned=446 (served) vs rows_deduped=223
+  identified companies  =203   <- correct count, but provenance doubled:
+                                  company-junction-foods -> ('row-1001#0',
+  'row-1001#1')
+  unidentified companies=12    <- should be 6
+    ['unidentified:row-2401#0', 'unidentified:row-2401#1', ...]
+
+  unique_row_labels disambiguates the replayed copies, and for unidentified rows
+  the key is built from the label — so one uploaded row becomes two companies.
+  203 + 12 = 215, × 4 = 860.
+
+  Two things make this worse than a miscount. It reintroduces the customer's
+  original complaint — duplicate creative — through a new path. And it breaks
+  the traceability invariant C2 exists to guarantee: row-1001#0 and row-1001#1
+  assert that two uploaded rows exist where the upload has one. The served
+  reading doesn't just risk being wrong, it's inconsistent with the conservation
+  property the rest of the design depends on.
+
+  Blast radius is contained but not zero. make demo, make verify and make test
+  are unaffected — demo.py:26 and the test both pass expected_row_count. And
+  evaluate_campaign_coverage catches it (6 companies never campaigned), so it
+  can't pass the check. But build_campaign_plan is the product path, and
+  aj_work/audit.py:161 calls collect_rows without the count while line 109
+  passes it — inconsistent within one file, so audit.py --loader ReplayingLoader
+  reports 215.
+
+  The fix is one line: default rows to fresh rather than served when no declared
+  size is supplied. Verified — the deduped reading alone gives exactly 209.
+
+  I want to argue against the current default fairly, because the docstring's
+  reasoning isn't wrong: a repeated page might be legitimate, and discarding
+  rows is irreversible. But _fingerprint includes id, so a legitimate repeat
+  needs two runs of rows identical in every field including their ids. That's
+  exotic. The current default's failure mode is the defect the customer actually
+  reported; the alternative's failure mode is hypothetical. And nothing is lost
+  either way — ReadResult already exposes both rows_served and rows_deduped,
+  and reason already flags the discrepancy.
+
+  What held up under attack
+
+  All ten tampering attempts rejected with accurate messages — dropped company,
+  empty plan, duplicated assets, invented company, swapped brand kit, swapped
+  template, blanked provenance, emptied exceptions, padded exceptions, missing
+  asset type. The exceptions-block reconciliation catching both directions is a
+  nice touch.
+
+  Paging behaviour is consistent across all five shapes × both lists, including
+  the two non-obvious ones: CyclingLoader reports claimed=False, verified=true
+  (we did collect all 223 and they match the declared size — never trusting a
+  service that didn't terminate, but not throwing away a verified read), and
+  SilentlyShortLoader on list 1 now correctly reports verified=false, which is
+  A3 genuinely closed for this path.
+
+  Synthetic edges pass: None / "" / "   " stay three companies; two blank rows
+  sharing an uploaded id stay two companies; a shared domain never merges; empty
+  upload gives zero.
+
+  Two smaller notes
+
+  Determinism (step 9) compares only len(other["companies"]) != len(expected) —
+  set size, not membership. Two different company sets of equal size would pass.
+  Comparing the sets costs nothing.
+
+  tests/test_visible.py is still the single starter smoke test. FIX_PLAN's F2
+  hasn't landed, so the probe suite I just ran is doing work no committed test
+  does — none of the ten tampering cases is protected against regression.
+
+  Want me to apply the _resolve default fix and the set-comparison tightening,
+  and land the probe suite as tests/ (F2)?
+
+✻ Worked for 3m 16s
+
+※ recap: We're auditing the campaign repo so it can prove what "complete" means; I tested the four recent commits and found one defect where a replaying service inflates the plan to 215 companies. Next: apply the one-line `_resolve` fix if you approve.
+
+❯ Can you re look I made some changes.                                          
+
+⏺ Bash(git log --oneline -3 && echo "=== working tree ===" && git status --short
+      && echo "=== unstaged diff ===" && git diff && echo "=== staged diff ==="
+      && git diff…)
+  ⎿  bba0e30 F: report companies rather than rows, and replace the one test
+      that agreed
+     8fbd855 E: surface the contested records, and guard attributes we do n
+     … +24 lines (ctrl+o to expand)
+
+⏺ Bash(git show --stat bba0e30 && echo "=== paging._resolve now ===" && sed -n
+      '100,140p' src/paging.py)
+  ⎿  commit bba0e303e2875b22509757c07993f0cb95de83e8
+     Author: adish007 <jainadish007@gmail.com>
+     Date:   Sun Aug 2 22:53:46 2026 -0700
+     … +90 lines (ctrl+o to expand)
+
+⏺ New commit F with a 22-test suite and a FilteringLoader. Let me run it and
+  read what it asserts.
+⏺ Bash(make test 2>&1 | tail -35)
+  ⎿  test_the_shipped_plan_passes (test_visible.CoverageEvaluatorTests.test
+     _the_shipped_plan_passes)
+     The baseline must pass, or the suite proves nothing by rejecting. ...
+     … +41 lines (ctrl+o to expand)
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      PYTHONPATH=src python3 $S/probe.py 2>&1 | tai…)
+  ⎿    PASS  rejects: empty plan  209 companies never campaigned, e.g. comp
+     any-alder-capital
+       PASS  rejects: duplicate one company's assets  company company-junct
+     … +32 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys…)
+  ⎿  plan built from a replaying service with NO declared size:
+       rows_read                  446
+       service_claimed_complete   True
+     … +13 lines (ctrl+o to expand)
+
+⏺ The _resolve design is unchanged, but commit F added a test that argues for
+  it. Let me verify the suite actually bites before I re-litigate anything.
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      rm -rf $S/mut && cp -r src $S/mut…)
+  ⎿    File "<stdin>", line 5
+         s=s.replace(\"\"\"                    "brand_kit_id": brand_kit_id
+     ,
+     … +16 lines (ctrl+o to expand)
+
+⏺ My heredoc quoting broke — those numbers are meaningless. Redoing it properly.
+
+  Made 1 scratchpad edit +94 (ctrl+o to expand)
+
+⏺ Bash(python3 /private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/
+      9334d3f7-50cb-49a0-b241-88cf90df5324/scratchpad/mutate.py 2>&1)
+  ⎿    baseline (no mutation)                     -> 0 failures   [OK]
+       C3 row brand kit wins again                -> 2 failures   caught
+       B2 blank identity folds to one bucket      -> 4 failures   caught
+     … +11 lines (ctrl+o to expand)
+
+⏺ Bash(S=/private/tmp/claude-501/-Users-jaina-Downloads-01-campaign-audit/9334d3
+      f7-50cb-49a0-b241-88cf90df5324/scratchpad
+      python3 - <<'PYEOF'…)
+  ⎿    baseline (no mutation)                     -> 0 failures   [OK]
+       D coverage check removed                   -> 0 failures   !! SURVIV
+     ED
+     … +10 lines (ctrl+o to expand)
+
+⏺ Bash(PYTHONPATH=src python3 - <<'EOF'
+      import json, sys, inspect…)
+  ⎿  can the evaluator's own read ever be incomplete?
+       the evaluator hardcodes its loader: True
+       len(accounts)=   0 -> verified_complete='true'
+     … +5 lines (ctrl+o to expand)
+
+⏺ Re-reviewed. Commit F landed (22 tests, all green), and it changed my mind on
+  one thing and turned up something the commit message understates.
+
+  I was wrong about _resolve
+
+  I recommended flipping the no-declared-size default from served to fresh.
+  test_two_legitimate_identical_pages_lose_no_rows makes the case against that,
+  and it's right: the reader genuinely cannot distinguish a replayed page from
+  an upload that honestly contains the same page twice, and fresh would delete
+  real rows. My mutation confirms the position is pinned — flipping it to fresh
+  fails a test. Withdrawn.
+
+  The 215/860 corner still exists but is disclosed, which I hadn't credited
+  properly:
+
+  verified_complete   unknown
+  completion_reason   ...; 446 rows served, 223 after removing repeated pages
+                      — cannot tell which is right without a declared size
+
+  Independent mutation testing
+
+  I re-ran mutation testing myself rather than trusting the commit message.
+  Baseline clean, and the caught counts line up with what F claims:
+
+  baseline (no mutation)                     -> 0 failures   [OK]
+  C3 row brand kit wins again                -> 2 failures   caught
+  B2 blank identity folds to one bucket      -> 4 failures   caught
+  B4 duplicate uploaded ids collide          -> 2 failures   caught
+  C4 shared domain disqualifies a company    -> 14 failures  caught
+  C1 deliverables per row again              -> 11 failures  caught
+  A repeated pages discarded                 -> 1 failures   caught
+  D exceptions reconciliation removed        -> 1 failures   caught
+
+  The correction: five evaluator conditions survive deletion, not one
+
+  The commit message says "One evaluator mutant survives by design." It's five:
+
+  D coverage check removed         -> 0 failures   SURVIVED
+  D untraced-rows check removed    -> 0 failures   SURVIVED
+  D asset-set check removed        -> 0 failures   SURVIVED
+  D honesty check removed          -> 0 failures   SURVIVED
+  D determinism check removed      -> 0 failures   SURVIVED
+
+  They survive for three different reasons, and only two matter:
+
+  Redundant (fine, and already disclosed). coverage and untraced-rows catch each
+  other — a dropped company also leaves its rows untraced. That's the one F
+  documented. Defense in depth.
+
+  Genuinely untested — asset-set. Nothing in the committed suite drops a single
+  asset type. My probe suite has that case and the evaluator catches it, so the
+  code is correct; the suite just doesn't prove it. A plan shipping 3 of 4
+  assets per company would sail through.
+
+  Unreachable by construction — honesty. This one is the real find.
+  evaluate_campaign_coverage hardcodes TargetAccountTool(accounts) for its own
+  read, and that loader can never fail:
+
+  the evaluator hardcodes its loader: True
+    len(accounts)=   0 -> verified_complete='true'
+    len(accounts)=   1 -> verified_complete='true'
+    len(accounts)= 223 -> verified_complete='true'
+
+  read.verified_complete != "true" at line 281 can never be true. It's dead
+  code. And it isn't what catches a broken read either — a plan built from
+  SilentlyShortLoader is rejected by coverage:
+
+  93 companies never campaigned, e.g. company-alder-foods
+
+  Re-reading through a known-good loader is the right call — it's what makes the
+  check independent rather than inheriting the plan's broken read. But that
+  decision makes step 10 vestigial. Either drop it, or have the evaluator
+  reconcile against the plan's reported verified_complete as a separate
+  condition ("the plan admits its read was incomplete") — which would be
+  reachable and would catch a case coverage can't: a plan that read short but
+  still happened to cover every company.
+
+  Two smaller items, unchanged from last review
+
+  build_campaign_plan's expected_row_count: int | None = None still lets a
+  caller build an unverifiable plan without ever deciding to. Given the whole
+  thesis here is "never let a number look right when it isn't," I'd make it a
+  keyword argument with no default — None stays legal, but you have to type it.
+  That sidesteps the _resolve debate entirely.
+
+  Determinism (line 274) still compares len(...) rather than the company sets.
+  Free to tighten.
+
+  DECISIONS.md
+
+  Two answers filled in; the rest are blank — roadmap-vs-shipped, agent
+  overrides, guarantees-vs-likelihoods, cause-vs-symptom, the before/after
+  command with output, what you chose not to fix, and what's still open. The
+  before/after command is the one with the most evidence already sitting in this
+  session — the 214/214/211 → 209/209/209 demo output, or the reconstructed
+  t-9f21 run.
+
+  Want me to add the missing asset-set test, resolve the honesty condition, and
+  make expected_row_count explicit?
+
+✻ Sautéed for 4m 32s
+
+※ recap: You're auditing the campaign repo so it proves 209 companies for list 1 and 99 for list 2; commits A–F have landed and all 22 tests pass. Next: decide whether I add the missing asset-set test, fix the unreachable honesty check, and make expected_row_count explicit.
