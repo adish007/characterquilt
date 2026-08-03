@@ -25,12 +25,12 @@ def _run(accounts: list[dict], request: dict, page_size: int) -> dict:
     for item in deliverables:
         kits[item["brand_kit_id"]] = kits.get(item["brand_kit_id"], 0) + 1
     return {
-        "rows campaigned": len(plan["source_row_ids"]),
+        "rows campaigned": len(plan["companies"]),
         "deliverables": len(deliverables),
         "distinct company_id in plan": len(
-            {item["company_id"] for item in deliverables}
+            {item["company_key"] for item in deliverables}
         ),
-        "complete flag": plan["complete"],
+        "complete flag": plan["verified_complete"],
         "_kits": kits,
     }
 

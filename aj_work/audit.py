@@ -99,18 +99,19 @@ def _report(inventory, read, request, *, list_path, loader_name, page_size):
 
 def _page_size_sensitivity(accounts, request, expected):
     print()
-    print("what the shipped builder reports for the same upload:")
+    print("what the builder reports for the same upload:")
     for size in COMPARISON_PAGE_SIZES:
         plan = build_campaign_plan(
             TargetAccountTool(accounts),
             brand_kit_id=request["brand_kit"]["id"],
             template_id=request["template"]["id"],
             page_size=size,
+            expected_row_count=len(accounts),
         )
-        rows = len(plan["source_row_ids"])
+        found = len(plan["companies"])
         print(
-            f"    page_size={size:<5} {rows} rows campaigned,"
-            f" complete={plan['complete']}   (off by {rows - expected:+d})"
+            f"    page_size={size:<5} {found} companies,"
+            f" verified={plan['verified_complete']}   (off by {found - expected:+d})"
         )
     print(f"    the count above is invariant: {expected} companies at any page size")
 
